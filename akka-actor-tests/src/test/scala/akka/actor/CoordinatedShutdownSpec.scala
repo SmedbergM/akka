@@ -5,20 +5,19 @@
 package akka.actor
 
 import java.util
-
 import scala.concurrent.duration._
 import scala.concurrent.Await
 import scala.concurrent.Future
 
 import akka.Done
-import akka.testkit.{ AkkaSpec, EventFilter, TestKit }
-import com.typesafe.config.{ Config, ConfigFactory }
+import akka.testkit.{AkkaSpec, EventFilter, TestKit}
+import com.typesafe.config.{Config, ConfigFactory}
 import akka.actor.CoordinatedShutdown.Phase
 import akka.actor.CoordinatedShutdown.UnknownReason
-
 import akka.util.ccompat.JavaConverters._
 import scala.concurrent.Promise
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 
 import akka.ConfigurationException
 
@@ -127,7 +126,12 @@ class CoordinatedShutdownSpec
 
     "run ordered phases" in {
       import system.dispatcher
-      val phases = Map("a" -> emptyPhase, "b" -> phase("a"), "c" -> phase("b", "a"))
+      val phases = Map(
+        "a" -> emptyPhase,
+        "b" -> phase("a"),
+        "c" -> phase("b", "a"),
+        "d" -> phase("c", "b", "a")
+      )
       val co = new CoordinatedShutdown(extSys, phases)
       co.addTask("a", "a1") { () =>
         testActor ! "A"
@@ -145,12 +149,33 @@ class CoordinatedShutdownSpec
           Done
         }
       }
-      co.addTask("c", "c1") { () =>
-        testActor ! "C"
+      co.addCancellableTask("b", "b3") { () =>
+        Future {
+          testActor ! "B"
+          Done
+        }
+      }
+      val cancellableTask = co.addCancellableTask("b", "b4") { () =>
+        Future {
+          testActor ! "B-cancel"
+          Done
+        }
+      }
+      val counterC = new AtomicInteger()
+      val taskC = () => Future {
+        counterC.incrementAndGet()
+        Done
+      }
+      co.addTask("c", "c1")(taskC)
+      co.addTask("c", "c2")(taskC)
+      cancellableTask.cancel()
+      co.addTask("d", "d1") { () =>
+        testActor ! "D"
         Future.successful(Done)
       }
       Await.result(co.run(UnknownReason), remainingOrDefault)
-      receiveN(4) should ===(List("A", "B", "B", "C"))
+      counterC.get shouldEqual 1 // adding the same function twice should only result in it running once
+      receiveN(5) should ===(List("A", "B", "B", "B", "D"))
     }
 
     "run from a given phase" in {

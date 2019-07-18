@@ -27,7 +27,7 @@ import akka.dispatch.ExecutionContexts
 import scala.util.Try
 import scala.concurrent.Await
 import java.util.concurrent.atomic.AtomicReference
-import java.util.function.{BiFunction, Supplier}
+import java.util.function.Supplier
 import java.util.Optional
 
 import akka.annotation.InternalApi
@@ -363,10 +363,8 @@ final class CoordinatedShutdown private[akka] (
   /** INTERNAL API */
   private[akka] val orderedPhases = CoordinatedShutdown.topologicalSort(phases)
 
-  private object tasks2 {
-    private type PhaseDef = Map[() => Future[Done], Vector[String]]
-
-    private val registeredTasks = new ConcurrentHashMap[String, PhaseDef]()
+  private object tasks {
+    private val registeredTasks = new ConcurrentHashMap[String, Map[() => Future[Done], Vector[String]]]()
 
     def get(phase: String): Option[Map[() => Future[Done], Vector[String]]] = Option(registeredTasks.get(phase))
 
@@ -377,39 +375,15 @@ final class CoordinatedShutdown private[akka] (
       }
     }
 
-    private object merger extends BiFunction[PhaseDef, PhaseDef, PhaseDef] {
-      override def apply(t: PhaseDef, u: PhaseDef): PhaseDef = t ++ u.map { case (task, names) =>
-        task -> (t.get(task).toVector.flatten ++ names)
-      }
-    }
-
-    private def unregister(phase: String)(task: () => Future[Done], name: String): Boolean = {
-      object differ extends BiFunction[PhaseDef, PhaseDef, PhaseDef] {
-        override def apply(prev: PhaseDef, subt: PhaseDef): PhaseDef = (prev ++ subt.flatMap { case (t, ns) =>
-          prev.get(t).map { prevNames =>
-            t -> prevNames.diff(ns)
-          }
-        }).filter(_._2.nonEmpty)
-      }
-      Option(registeredTasks.get(phase)).fold(false) { phaseDef =>
-        phaseDef.get(task).fold(false) {
-          case names if names.contains(name) =>
-            registeredTasks.merge(phase, Map(task -> Vector(name)), differ)
-            true
-          case _ =>
-            false
-        }
-      }
-    }
-
     def register(phase: String)(task: () => Future[Done], name: String): Cancellable = {
-      registeredTasks.merge(phase, Map(task -> Vector(name)), merger)
+      registeredTasks.merge(phase, Map(task -> Vector(name)), (t, u) => t ++ u.map { case (k, names) =>
+        k -> (t.get(k).toVector.flatten ++ names)
+      })
       new Cancellable {
-
         private val p = Promise[Unit]()
 
         override def cancel(): Boolean = {
-          if (p.isCompleted) {
+          if (p.isCompleted) { // This ensures that multiple calls to `cancel` don't unregister another task with the same name
             false
           } else {
             unregister(phase)(task, name) && p.trySuccess {
@@ -419,6 +393,22 @@ final class CoordinatedShutdown private[akka] (
         }
 
         override def isCancelled: Boolean = p.isCompleted
+      }
+    }
+
+    private def unregister(phase: String)(task: () => Future[Done], name: String): Boolean = {
+      Option(registeredTasks.get(phase)).fold(false) { phaseDef =>
+        phaseDef.get(task).fold(false) {
+          case names if names.contains(name) =>
+            registeredTasks.merge(phase, Map(task -> Vector(name)), (prev, subt) => (prev ++ subt.flatMap { case (t, ns) =>
+              prev.get(t).map { prevNames =>
+                t -> prevNames.diff(ns) // replaces the previous job names at t with a sequence with one fewer occurrence of each name in `ns`
+              }
+            }).filter(_._2.nonEmpty))
+            true
+          case _ =>
+            false
+        }
       }
     }
   }
@@ -439,7 +429,22 @@ final class CoordinatedShutdown private[akka] (
    */
   private[akka] def jvmHooksLatch: CountDownLatch = _jvmHooksLatch.get
 
-
+  /**
+   * Scala API: Add a task to a phase, returning an object which will cancel it
+   * on demand and remove it from the task pool (so long as the same task has not
+   * been added elsewhere). Tasks in a phase are run concurrently, with no ordering
+   * assumed.
+   *
+   * Adding a task to a phase does not remove any other tasks from the phase.
+   *
+   * If the same task is added multiple times, each addition must be canceled
+   * in order to remove the task from the phase. Such a task is in any case not
+   * run more than once.
+   *
+   * Tasks should typically be registered as early as possible -- once coordinated
+   * shutdown begins, tasks may be added without ever being run. A task may add tasks
+   * to a later stage with confidence that they will be run.
+   */
   def addCancellableTask(phase: String, taskName: String)(task: () => Future[Done]): Cancellable = {
     require(knownPhases(phase),
       s"Unknown phase [$phase], known phases [${
@@ -450,7 +455,27 @@ final class CoordinatedShutdown private[akka] (
       "Set a task name when adding tasks to the Coordinated Shutdown. " +
       "Try to use unique, self-explanatory names."
     )
-    tasks2.register(phase)(task, taskName)
+    tasks.register(phase)(task, taskName)
+  }
+
+  /**
+    * Java API: Add a task to a phase, returning an object which will cancel it
+    * on demand and remove it from the task pool (so long as the same task has not
+    * been added elsewhere). Tasks in a phase are run concurrently, with no ordering
+    * assumed.
+    *
+    * Adding a task to a phase does not remove any other tasks from the phase.
+    *
+    * If the same task is added multiple times, each addition must be canceled
+    * in order to remove the task from the phase. Such a task is in any case not
+    * run more than once.
+    *
+    * Tasks should typically be registered as early as possible -- once coordinated
+    * shutdown begins, tasks may be added without ever being run. A task may add tasks
+    * to a later stage with confidence that they will be run.
+    */
+  def addCancellableTask(phase: String, taskName: String, task: Supplier[CompletionStage[Done]]): Cancellable = {
+    addCancellableTask(phase, taskName)(() => task.get().toScala)
   }
 
   /**
@@ -474,7 +499,7 @@ final class CoordinatedShutdown private[akka] (
       taskName.nonEmpty,
       "Set a task name when adding tasks to the Coordinated Shutdown. " +
       "Try to use unique, self-explanatory names.")
-    tasks2.register(phase)(task, taskName)
+    tasks.register(phase)(task, taskName)
   }
 
   /**
@@ -588,12 +613,12 @@ final class CoordinatedShutdown private[akka] (
         remainingPhases match {
           case Nil => Future.successful(Done)
           case phase :: remaining if !phases(phase).enabled =>
-            tasks2.get(phase).foreach { phaseDef =>
+            tasks.get(phase).foreach { phaseDef =>
               log.info("Phase [{}] disabled through configuration, skipping [{}] tasks", phase, phaseDef.size)
             }
             loop(remaining)
           case phase :: remaining =>
-            val phaseResult2 = tasks2.get(phase) match {
+            val phaseResult = tasks.get(phase) match {
               case None =>
                 if (debugEnabled) log.debug("Performing phase [{}] with [0] tasks", phase)
                 Future.successful(Done)
@@ -649,9 +674,9 @@ final class CoordinatedShutdown private[akka] (
                 Future.firstCompletedOf(List(result, timeoutFut))
             }
             if (remaining.isEmpty)
-              phaseResult2 // avoid flatMap when system terminated in last phase
+              phaseResult // avoid flatMap when system terminated in last phase
             else
-              phaseResult2.flatMap(_ => loop(remaining))
+              phaseResult.flatMap(_ => loop(remaining))
         }
       }
 
@@ -699,7 +724,7 @@ final class CoordinatedShutdown private[akka] (
    * Sum of timeouts of all phases that have some task.
    */
   def totalTimeout(): FiniteDuration = {
-    tasks2.totalDuration()
+    tasks.totalDuration()
   }
 
   /**

@@ -1071,8 +1071,16 @@ Scala
 Java
 :  @@snip [ActorDocTest.java](/akka-docs/src/test/java/jdocs/actor/ActorDocTest.java) { #coordinated-shutdown-addTask }
 
+If cancellation of previously added tasks is required,
+
+Scala
+:  @@snip [ActorDocSpec.scala](/akka-docs/src/test/scala/docs/actor/ActorDocSpec.scala) { #coordinated-shutdown-cancellable }
+
+Java
+:  @@snip [ActorDocTest.java](/akka-docs/src/test/java/jdocs/actor/ActorDocTest.java) { #coordinated-shutdown-cancellable }
+
 The returned @scala[`Future[Done]`] @java[`CompletionStage<Done>`] should be completed when the task is completed. The task name parameter
-is only used for debugging/logging.
+is used for debugging, logging, and identifying whether the provided task has been registered multiple times.
 
 Tasks added to the same phase are executed in parallel without any ordering assumptions.
 Next phase will not start until all tasks of previous phase have been completed.
@@ -1092,7 +1100,7 @@ Java
 :  @@snip [ActorDocTest.java](/akka-docs/src/test/java/jdocs/actor/ActorDocTest.java) { #coordinated-shutdown-addActorTerminationTask }
 
 Tasks should typically be registered as early as possible after system startup. When running
-the coordinated shutdown tasks that have been registered will be performed but tasks that are
+the coordinated shutdown, tasks that have been registered will be performed but tasks that are
 added too late will not be run.
 
 To start the coordinated shutdown process you can invoke @scala[`run`] @java[`runAll`] on the `CoordinatedShutdown`

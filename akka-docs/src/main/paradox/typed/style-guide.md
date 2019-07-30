@@ -235,8 +235,8 @@ Java
 
 ## Where to define messages
 
-When sending messages to another actor or receiving responses the messages should be prefixed with the name
-of the actor/behavior that defines the message to make it clear and avoid ambiguity.
+When sending or receiving actor messages they should be prefixed with the name
+of the actor/behavior that defines them to avoid ambiguities.
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #message-prefix-in-tell }
@@ -244,14 +244,14 @@ Scala
 Java
 :  @@snip [StyleGuideDocExamples.java](/akka-actor-typed-tests/src/test/java/jdocs/akka/typed/StyleGuideDocExamples.java) { #message-prefix-in-tell }
 
-That is preferred over using @scala[importing `Down` and using `countDown ! Down`]
+Such a style is preferred over using @scala[importing `Down` and using `countDown ! Down`]
 @java[importing `Down` and using `countDown.tell(Down.INSTANCE);`].
-In the implementation of the `Behavior` that handle these messages the short names can be used.
+However, within the `Behavior` that handle these messages the short names can be used.
 
-That is a reason for not defining the messages as top level classes in a package.
+Therefore it is not recommended to define messages as top-level classes.
 
-An actor typically has a primary `Behavior` or it's only using one `Behavior` and then it's good to define
-the messages @scala[in the companion object]@java[as static inner classes] together with that `Behavior`.
+For the majority of cases it's good style to define
+the messages @scala[in the companion object]@java[as static inner classes] together with the `Behavior`.
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #messages }
@@ -259,11 +259,10 @@ Scala
 Java
 :  @@snip [StyleGuideDocExamples.java](/akka-actor-typed-tests/src/test/java/jdocs/akka/typed/StyleGuideDocExamples.java) { #messages }
 
-Sometimes several actors share the same messages, because they have a tight coupling and using message adapters
-would introduce to much boilerplate and duplication. If there is no "natural home" for such messages they can be
-be defined in a separate @scala[`object`]@java[`interface`] to give them a naming scope.
+If several actors share the same message protocol, it's recommended to define
+those messages in a separate @scala[`object`]@java[`interface`] for that protocol.
 
-Example of shared message protocol:
+Here's an example of a shared message protocol setup:
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #message-protocol }
@@ -273,14 +272,14 @@ Java
 
 ## Public versus private messages
 
-Often an actor has some messages that are only for it's internal implementation and not part of the public
-message protocol. For example, it can be timer messages or wrapper messages for `ask` or `messageAdapter`.
+Often an actor has some messages that are only for its internal implementation and not part of the public
+message protocol, such as timer messages or wrapper messages for `ask` or `messageAdapter`.
 
-That can be be achieved by defining those messages with `private` visibility. Then they can't be accessed
-and sent from the outside of the actor. The private messages must still @scala[extend]@java[implement] the
+Such messages should be declared `private` so they can't be accessed
+and sent from the outside of the actor. Note that they must still @scala[extend]@java[implement] the
 public `Command` @scala[trait]@java[interface].
 
-Example of a private visibility for internal message:
+Here is an example of using `private` for an internal message:
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #public-private-messages-1 }
@@ -288,12 +287,12 @@ Scala
 Java
 :  @@snip [StyleGuideDocExamples.java](/akka-actor-typed-tests/src/test/java/jdocs/akka/typed/StyleGuideDocExamples.java) { #public-private-messages-1 }
 
-There is another approach, which is valid but more complicated. It's not relying on visibility from the programming
-language but instead only exposing part of the message class hierarchy to the outside, by using `narrow`. The
-former approach is recommended but it can be good to know this "trick", for example it can be useful when
+An alternative approach is using a type hierarchy and `narrow` to have a super-type for the public messages as a
+distinct type from the super-type of all actor messages.  The
+former approach is recommended but it is good to know this alternative as it can be useful when
 using shared message protocol classes as described in @ref:[Where to define messages](#where-to-define-messages).
 
-Example of not exposing internal message in public `Behavior` type:
+Here's an example of using a type hierarchy to separate public and private messages:
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #public-private-messages-2 }
@@ -360,16 +359,15 @@ Also, don't use braces and return statements in one-line lambda bodies.
 
 ## Partial versus total Function
 
-It's recommended to use a `sealed` trait as the super type of the commands (incoming messages) of a an actor
-because then the Scala compiler will emit a warning if a message type is forgotten in the pattern match.
+It's recommended to use a `sealed` trait as the super type of the commands (incoming messages) of an actor
+as the compiler will emit a warning if a message type is forgotten in the pattern match.
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #messages-sealed }
 
-That is the main reason for why `Behaviors.receive`, `Behaviors.receiveMessage` takes a total `Function` and
-not a `PartialFunction`.
+That is the main reason for `Behaviors.receive`, `Behaviors.receiveMessage` taking a `Function` rather than a `PartialFunction`.
 
-The compiler warning if `GetValue` is not handled:
+The compiler warning if `GetValue` is not handled would be:
 
 ```
 [warn] ... Counter.scala:45:34: match may not be exhaustive.
@@ -385,13 +383,13 @@ in the pattern match and return `Behaviors.unhandled`.
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #pattern-match-unhandled }
 
-One thing to be aware of is the exhaustiveness check is not enabled when there is a guard condition in the
+One thing to be aware of is the exhaustiveness check is not enabled when there is a guard condition in any of the
 pattern match cases.
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #pattern-match-guard }
 
-Therefore it can be better to not use the guard and instead move the `if` after the `=>`.
+Therefore, for the purposes of exhaustivity checking, it is be better to not use guards and instead move the `if`s after the `=>`.
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #pattern-match-without-guard }
@@ -409,29 +407,28 @@ Scala
 
 ## ask versus ?
 
-When using the `AskPattern` it's recommended to use the `ask` method rather than the `?` operator.
+When using the `AskPattern` it's recommended to use the `ask` method rather than the infix `?` operator, like so:
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #ask-1 }
 
-Instead of the `replyTo` you can use `_` for less verbosity.
+You may also use the more terse placeholder syntax `_` instead of `replyTo`:
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #ask-2 }
 
-When using `?` the following doesn't compile because of type inference problem:
+However, using the infix operator `?` with the placeholder syntax `_`, like is done in the following example, won't typecheck because of the binding scope rules for wildcard parameters:
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #ask-3 }
 
-By adding parentheses it works but is rather ugly, and therefore better to stick with `ask`.
+Adding the necessary parentheses (as shown below) makes it typecheck, but, subjectively, it's rather ugly so the recommendation is to use `ask`.
 
 Scala
 :  @@snip [StyleGuideDocExamples.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/StyleGuideDocExamples.scala) { #ask-4 }
 
 Note that `AskPattern` is only intended for request-response interaction from outside an actor. If the requester is
-inside an actor, prefer `ActorContext.ask` as it provides better thread-safety by not involving
-@scala[`Future`]@java[`CompletionStage`] inside the actor.
+inside an actor, prefer `ActorContext.ask` as it provides better thread-safety by not requiring the use of a @scala[`Future`]@java[`CompletionStage`] inside the actor.
 
 @@@
 
@@ -446,5 +443,5 @@ is a list of additional conventions:
 * Incoming messages to an actor are typically called commands, and therefore the super type of all
   messages that an actor can handle is typically @scala[`sealed trait Command`]@java[`interface Command {}`].
 
-* Use past tense for the events persisted by an `EventSourcedBehavior` since those represent facts that has happened,
-  e.g. `Incremented`.
+* Use past tense for the events persisted by an `EventSourcedBehavior` since those represent facts that have happened,
+  for example `Incremented`.

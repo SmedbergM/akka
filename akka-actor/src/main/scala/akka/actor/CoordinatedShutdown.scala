@@ -354,7 +354,7 @@ final class CoordinatedShutdown private[akka] (
     system: ExtendedActorSystem,
     phases: Map[String, CoordinatedShutdown.Phase])
     extends Extension {
-  import CoordinatedShutdown.{Reason, UnknownReason}
+  import CoordinatedShutdown.{ Reason, UnknownReason }
 
   /** INTERNAL API */
   private[akka] val log = Logging(system, getClass)
@@ -370,15 +370,21 @@ final class CoordinatedShutdown private[akka] (
 
     def totalDuration(): FiniteDuration = {
       import akka.util.ccompat.JavaConverters._
-      registeredTasks.keySet.asScala.foldLeft(Duration.Zero) { case (acc, phase) =>
-        acc + timeout(phase)
+      registeredTasks.keySet.asScala.foldLeft(Duration.Zero) {
+        case (acc, phase) =>
+          acc + timeout(phase)
       }
     }
 
     def register(phase: String)(task: () => Future[Done], name: String): Cancellable = {
-      registeredTasks.merge(phase, Map(task -> Vector(name)), (t, u) => t ++ u.map { case (k, names) =>
-        k -> (t.get(k).toVector.flatten ++ names)
-      })
+      registeredTasks.merge(
+        phase,
+        Map(task -> Vector(name)),
+        (t, u) =>
+          t ++ u.map {
+            case (k, names) =>
+              k -> (t.get(k).toVector.flatten ++ names)
+          })
       new Cancellable {
         private val p = Promise[Unit]()
 
@@ -400,11 +406,16 @@ final class CoordinatedShutdown private[akka] (
       Option(registeredTasks.get(phase)).fold(false) { phaseDef =>
         phaseDef.get(task).fold(false) {
           case names if names.contains(name) =>
-            registeredTasks.merge(phase, Map(task -> Vector(name)), (prev, subt) => (prev ++ subt.flatMap { case (t, ns) =>
-              prev.get(t).map { prevNames =>
-                t -> prevNames.diff(ns) // replaces the previous job names at t with a sequence with one fewer occurrence of each name in `ns`
-              }
-            }).filter(_._2.nonEmpty))
+            registeredTasks.merge(
+              phase,
+              Map(task -> Vector(name)),
+              (prev, subt) =>
+                (prev ++ subt.flatMap {
+                  case (t, ns) =>
+                    prev.get(t).map { prevNames =>
+                      t -> prevNames.diff(ns) // replaces the previous job names at t with a sequence with one fewer occurrence of each name in `ns`
+                    }
+                }).filter(_._2.nonEmpty))
             true
           case _ =>
             false
@@ -446,34 +457,32 @@ final class CoordinatedShutdown private[akka] (
    * to a later stage with confidence that they will be run.
    */
   def addCancellableTask(phase: String, taskName: String)(task: () => Future[Done]): Cancellable = {
-    require(knownPhases(phase),
-      s"Unknown phase [$phase], known phases [${
-        knownPhases
-      }]. All phases (along with their optional dependencies) must be defined in configuration"
-    )
-    require(taskName.nonEmpty,
+    require(
+      knownPhases(phase),
+      s"Unknown phase [$phase], known phases [${knownPhases}]. All phases (along with their optional dependencies) must be defined in configuration")
+    require(
+      taskName.nonEmpty,
       "Set a task name when adding tasks to the Coordinated Shutdown. " +
-      "Try to use unique, self-explanatory names."
-    )
+      "Try to use unique, self-explanatory names.")
     tasks.register(phase)(task, taskName)
   }
 
   /**
-    * Java API: Add a task to a phase, returning an object which will cancel it
-    * on demand and remove it from the task pool (so long as the same task has not
-    * been added elsewhere). Tasks in a phase are run concurrently, with no ordering
-    * assumed.
-    *
-    * Adding a task to a phase does not remove any other tasks from the phase.
-    *
-    * If the same task is added multiple times, each addition must be canceled
-    * in order to remove the task from the phase. Such a task is in any case not
-    * run more than once.
-    *
-    * Tasks should typically be registered as early as possible -- once coordinated
-    * shutdown begins, tasks may be added without ever being run. A task may add tasks
-    * to a later stage with confidence that they will be run.
-    */
+   * Java API: Add a task to a phase, returning an object which will cancel it
+   * on demand and remove it from the task pool (so long as the same task has not
+   * been added elsewhere). Tasks in a phase are run concurrently, with no ordering
+   * assumed.
+   *
+   * Adding a task to a phase does not remove any other tasks from the phase.
+   *
+   * If the same task is added multiple times, each addition must be canceled
+   * in order to remove the task from the phase. Such a task is in any case not
+   * run more than once.
+   *
+   * Tasks should typically be registered as early as possible -- once coordinated
+   * shutdown begins, tasks may be added without ever being run. A task may add tasks
+   * to a later stage with confidence that they will be run.
+   */
   def addCancellableTask(phase: String, taskName: String, task: Supplier[CompletionStage[Done]]): Cancellable = {
     addCancellableTask(phase, taskName)(() => task.get().toScala)
   }
@@ -628,28 +637,30 @@ final class CoordinatedShutdown private[akka] (
                     "Performing phase [{}] with [{}] tasks: [{}]",
                     phase,
                     phaseDef.size,
-                    phaseDef.values.flatten.mkString(", ")
-                  )
+                    phaseDef.values.flatten.mkString(", "))
                 }
                 val recoverEnabled = phases(phase).recover
-                val result = Future.sequence(phaseDef.map { case (task, names) =>
-                  try {
-                    val r = task()
-                    if (recoverEnabled) r.recover {
-                      case NonFatal(e) =>
-                        log.warning("Task [{}] failed in phase [{}]: {}", names.mkString(", "), phase, e.getMessage)
-                        Done
-                    } else r
-                  } catch {
-                    case NonFatal(e) =>
-                      // in case task.apply throws
-                      if (recoverEnabled) {
-                        log.warning("Task [{}] failed in phase [{}]: {}", names.mkString(", "), phase, e.getMessage)
-                        Future.successful(Done)
-                      } else
-                        Future.failed(e)
-                  }
-                }).map(_ => Done)
+                val result = Future
+                  .sequence(phaseDef.map {
+                    case (task, names) =>
+                      try {
+                        val r = task()
+                        if (recoverEnabled) r.recover {
+                          case NonFatal(e) =>
+                            log.warning("Task [{}] failed in phase [{}]: {}", names.mkString(", "), phase, e.getMessage)
+                            Done
+                        } else r
+                      } catch {
+                        case NonFatal(e) =>
+                          // in case task.apply throws
+                          if (recoverEnabled) {
+                            log.warning("Task [{}] failed in phase [{}]: {}", names.mkString(", "), phase, e.getMessage)
+                            Future.successful(Done)
+                          } else
+                            Future.failed(e)
+                      }
+                  })
+                  .map(_ => Done)
                 val timeout = phases(phase).timeout
                 val deadline = Deadline.now + timeout
                 val timeoutFut = try {

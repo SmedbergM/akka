@@ -739,16 +739,16 @@ class ActorDocSpec extends AkkaSpec("""
       def cleanup(): Unit = {}
       import system.dispatcher
       //#coordinated-shutdown-cancellable
-        val c = CoordinatedShutdown(system).addCancellableTask(
-          CoordinatedShutdown.PhaseBeforeServiceUnbind, "cleanup"
-        ) { () => Future {
+      val c = CoordinatedShutdown(system).addCancellableTask(CoordinatedShutdown.PhaseBeforeServiceUnbind, "cleanup") {
+        () =>
+          Future {
             cleanup()
             Done
           }
-        }
+      }
 
-        // much later...
-        c.cancel()
+      // much later...
+      c.cancel()
       //#coordinated-shutdown-cancellable
     }
 

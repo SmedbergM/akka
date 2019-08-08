@@ -11,7 +11,7 @@ import scala.concurrent.Future
 
 import akka.Done
 import akka.testkit.{ AkkaSpec, EventFilter, TestKit, TestProbe }
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{ Config, ConfigFactory }
 import akka.actor.CoordinatedShutdown.Phase
 import akka.actor.CoordinatedShutdown.UnknownReason
 import akka.util.ccompat.JavaConverters._
@@ -127,12 +127,7 @@ class CoordinatedShutdownSpec
 
     "run ordered phases" in {
       import system.dispatcher
-      val phases = Map(
-        "a" -> emptyPhase,
-        "b" -> phase("a"),
-        "c" -> phase("b", "a"),
-        "d" -> phase("c", "b", "a")
-      )
+      val phases = Map("a" -> emptyPhase, "b" -> phase("a"), "c" -> phase("b", "a"), "d" -> phase("c", "b", "a"))
       val co = new CoordinatedShutdown(extSys, phases)
       co.addTask("a", "a1") { () =>
         testActor ! "A"
@@ -163,10 +158,11 @@ class CoordinatedShutdownSpec
         }
       }
       val counterC = new AtomicInteger()
-      val taskC = () => Future {
-        counterC.incrementAndGet()
-        Done
-      }
+      val taskC = () =>
+        Future {
+          counterC.incrementAndGet()
+          Done
+        }
       co.addTask("c", "c1")(taskC)
       co.addTask("c", "c2")(taskC)
       cancellableTask.cancel()

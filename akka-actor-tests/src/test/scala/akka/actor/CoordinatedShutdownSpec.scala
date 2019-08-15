@@ -161,10 +161,11 @@ class CoordinatedShutdownSpec
 
       val task0Counter = new AtomicInteger()
 
-      val task0: () => Future[Done] = () => Future {
-        task0Counter.incrementAndGet()
-        Done
-      }
+      val task0: () => Future[Done] = () =>
+        Future {
+          task0Counter.incrementAndGet()
+          Done
+        }
 
       co.addCancellableTask("a", "task0-copy0")(task0)
       co.addCancellableTask("a", "task0-copy1")(task0)
@@ -178,7 +179,7 @@ class CoordinatedShutdownSpec
           Done
         }
 
-        def register(phase: String, name: String): Cancellable = co.addCancellableTask(phase, name)(taskMethod)
+        def register(phase: String, name: String): Cancellable = co.addCancellableTask(phase, name)(taskMethod _)
       }
 
       Task1.register("b", "task1-copy0")
@@ -187,32 +188,39 @@ class CoordinatedShutdownSpec
 
       // Adding the same task twice under the same phase/name will still run it twice
       val task2counter = new AtomicInteger()
-      co.addCancellableTask("a", "task2")(() => Future {
-        task2counter.incrementAndGet()
-        Done
-      })
-      co.addCancellableTask("a", "task2")(() => Future {
-        task2counter.incrementAndGet()
-        Done
-      })
-      val cancellable2 = co.addCancellableTask("a", "task2")(() => Future {
-        task2counter.incrementAndGet()
-        Done
-      })
+      co.addCancellableTask("a", "task2")(() =>
+        Future {
+          task2counter.incrementAndGet()
+          Done
+        })
+      co.addCancellableTask("a", "task2")(() =>
+        Future {
+          task2counter.incrementAndGet()
+          Done
+        })
+      val cancellable2 = co.addCancellableTask("a", "task2")(() =>
+        Future {
+          task2counter.incrementAndGet()
+          Done
+        })
 
       object TaskAB { // tests cancellation by tasks in a previous/later phase
         val promiseA = Promise[Unit]
         val promiseB = Promise[Unit]
-        val taskA: Cancellable = co.addCancellableTask("a", "task-a"){ () => Future {
-          taskB.cancel()
-          promiseA.trySuccess(log.info("Completing Promise A"))
-          Done
-        }}
-        val taskB: Cancellable = co.addCancellableTask("b", "task-b"){ () => Future {
-          taskA.cancel()
-          promiseB.trySuccess(log.info("Completing Promise B"))
-          Done
-        }}
+        val taskA: Cancellable = co.addCancellableTask("a", "task-a") { () =>
+          Future {
+            taskB.cancel()
+            promiseA.trySuccess(log.info("Completing Promise A"))
+            Done
+          }
+        }
+        val taskB: Cancellable = co.addCancellableTask("b", "task-b") { () =>
+          Future {
+            taskA.cancel()
+            promiseB.trySuccess(log.info("Completing Promise B"))
+            Done
+          }
+        }
       }
 
       TaskAB.promiseA.isCompleted shouldBe false

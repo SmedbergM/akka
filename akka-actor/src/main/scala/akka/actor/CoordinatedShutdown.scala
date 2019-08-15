@@ -381,22 +381,28 @@ final class CoordinatedShutdown private[akka] (
           if (log.isDebugEnabled) {
             log.debug("Performing task [{}] in CoordinatedShutdown phase [{}]", name, phaseName)
           }
-          try {
-            task.apply().recover {
+          if (p.isCompleted) {
+            Future.successful(Done)
+          } else {
+            val f = try {
+              task.apply().recover {
+                case NonFatal(exc) if recoverEnabled =>
+                  log.warning("Task [{}] failed in phase [{}]: {}", name, phaseName, exc.getMessage)
+                  Done
+              }
+            } catch { // in case task.apply() throws
               case NonFatal(exc) if recoverEnabled =>
-                log.warning("Task [{}] failed in phase [{}]: {}", name, phaseName, exc.getMessage)
-                Done
+                log.warning(
+                  "Task [{}] in phase [{}] threw an exception before its future could be constructed: {}",
+                  name,
+                  phaseName,
+                  exc.getMessage)
+                Future.successful(Done)
+              case NonFatal(exc) =>
+                Future.failed(exc)
             }
-          } catch { // in case task.apply() throws
-            case NonFatal(exc) if recoverEnabled =>
-              log.warning(
-                "Task [{}] in phase [{}] threw an exception before its future could be constructed: {}",
-                name,
-                phaseName,
-                exc.getMessage)
-              Future.successful(Done)
-            case NonFatal(exc) =>
-              Future.failed(exc)
+            p.completeWith(f.map(_ => ()))
+            f
           }
         }
         private val p = Promise[Unit]()
@@ -421,7 +427,7 @@ final class CoordinatedShutdown private[akka] (
       override val size: Int = tasks.size
 
       override def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done] = {
-        Future.sequence(tasks.map(_.run(recoverEnabled))).map(_ => Done)
+        Future.sequence(tasks.map(_.run(recoverEnabled))).map(_ => Done)(ExecutionContexts.sameThreadExecutionContext)
       }
 
       // This method may be run multiple times during the compare-and-set loop of ConcurrentHashMap, so it must be side-effect-free

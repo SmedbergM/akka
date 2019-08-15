@@ -9,23 +9,20 @@ import scala.compat.java8.FutureConverters._
 import scala.compat.java8.OptionConverters._
 import java.util.concurrent._
 import java.util.concurrent.TimeUnit.MILLISECONDS
+import scala.concurrent.{ Await, ExecutionContext, Future, Promise }
 
-import scala.concurrent.Future
-import scala.concurrent.Promise
 import akka.Done
 import com.typesafe.config.Config
-
 import scala.concurrent.duration.FiniteDuration
 import scala.annotation.tailrec
+
 import com.typesafe.config.ConfigFactory
 import akka.pattern.after
-
 import scala.util.control.NonFatal
+
 import akka.event.Logging
 import akka.dispatch.ExecutionContexts
-
 import scala.util.Try
-import scala.concurrent.Await
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Supplier
 import java.util.Optional
@@ -363,64 +360,103 @@ final class CoordinatedShutdown private[akka] (
   /** INTERNAL API */
   private[akka] val orderedPhases = CoordinatedShutdown.topologicalSort(phases)
 
+  private trait PhaseDefinition {
+    def size: Int
+    def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done]
+  }
+
   private object tasks {
-    private val registeredTasks = new ConcurrentHashMap[String, Map[() => Future[Done], Vector[String]]]()
-
-    def get(phase: String): Option[Map[() => Future[Done], Vector[String]]] = Option(registeredTasks.get(phase))
-
-    def totalDuration(): FiniteDuration = {
-      import akka.util.ccompat.JavaConverters._
-      registeredTasks.keySet.asScala.foldLeft(Duration.Zero) {
-        case (acc, phase) =>
-          acc + timeout(phase)
-      }
+    private val registeredPhases = new ConcurrentHashMap[String, StrictPhaseDefinition]()
+    private trait TaskDefinition extends Cancellable {
+      private[tasks] def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done]
     }
+    private object TaskDefinition {
+      def create(phaseName: String, task: () => Future[Done], name: String): TaskDefinition = new TaskDefinition {
+        // This is a vanilla class instead of a case class to avoid default implementations of .hashCode() and .equals
+        // Different code paths could register the same task under the same name multiple times; in this case we want to
+        // run that task as many times as it was registered (minus the number of times those were cancelled), so they must
+        // be distinct in a Set[TaskDefinition].
 
-    def register(phase: String)(task: () => Future[Done], name: String): Cancellable = {
-      registeredTasks.merge(
-        phase,
-        Map(task -> Vector(name)),
-        (t, u) =>
-          t ++ u.map {
-            case (k, names) =>
-              k -> (t.get(k).toVector.flatten ++ names)
-          })
-      new Cancellable {
+        override private[tasks] def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done] = {
+          if (log.isDebugEnabled) {
+            log.debug("Performing task [{}] in CoordinatedShutdown phase [{}]", name, phaseName)
+          }
+          try {
+            task.apply().recover {
+              case NonFatal(exc) if recoverEnabled =>
+                log.warning("Task [{}] failed in phase [{}]: {}", name, phaseName, exc.getMessage)
+                Done
+            }
+          } catch { // in case task.apply() throws
+            case NonFatal(exc) if recoverEnabled =>
+              log.warning(
+                "Task [{}] in phase [{}] threw an exception before its future could be constructed: {}",
+                name,
+                phaseName,
+                exc.getMessage)
+              Future.successful(Done)
+            case NonFatal(exc) =>
+              Future.failed(exc)
+          }
+        }
         private val p = Promise[Unit]()
 
         override def cancel(): Boolean = {
-          if (p.isCompleted) { // This ensures that multiple calls to `cancel` don't unregister another task with the same name
-            false
-          } else {
-            unregister(phase)(task, name) && p.trySuccess {
-              log.info("Successfully unregistered task [{}] from phase {}.", name, phase)
-            }
+          val cancelled = p.trySuccess(())
+          // now release all cancelled tasks in phase
+          registeredPhases
+            .merge(phaseName, StrictPhaseDefinition.empty, (previous, incoming) => previous.merge(incoming))
+          if (cancelled && log.isDebugEnabled) {
+            log.debug("Successfully cancelled CoordinatedShutdown task [{}] from phase [{}].", name, phaseName)
           }
+          cancelled
         }
 
         override def isCancelled: Boolean = p.isCompleted
       }
     }
 
-    private def unregister(phase: String)(task: () => Future[Done], name: String): Boolean = {
-      Option(registeredTasks.get(phase)).fold(false) { phaseDef =>
-        phaseDef.get(task).fold(false) {
-          case names if names.contains(name) =>
-            registeredTasks.merge(
-              phase,
-              Map(task -> Vector(name)),
-              (prev, subt) =>
-                (prev ++ subt.flatMap {
-                  case (t, ns) =>
-                    prev.get(t).map { prevNames =>
-                      t -> prevNames.diff(ns) // replaces the previous job names at t with a sequence with one fewer occurrence of each name in `ns`
-                    }
-                }).filter(_._2.nonEmpty))
-            true
-          case _ =>
-            false
-        }
+    private case class StrictPhaseDefinition(tasks: Set[TaskDefinition]) extends PhaseDefinition {
+      // This is a case class so that the update methods on ConcurrentHashMap can correctly deal with equality
+      override val size: Int = tasks.size
+
+      override def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done] = {
+        Future.sequence(tasks.map(_.run(recoverEnabled))).map(_ => Done)
       }
+
+      // This method may be run multiple times during the compare-and-set loop of ConcurrentHashMap, so it must be side-effect-free
+      def merge(other: StrictPhaseDefinition): StrictPhaseDefinition = {
+        val nextTasks = (tasks ++ other.tasks).filterNot(_.isCancelled)
+        copy(tasks = nextTasks)
+      }
+    }
+
+    private object StrictPhaseDefinition {
+      def single(taskDefinition: TaskDefinition): StrictPhaseDefinition = {
+        StrictPhaseDefinition(Set(taskDefinition))
+      }
+      val empty: StrictPhaseDefinition = StrictPhaseDefinition(Set.empty)
+    }
+
+    //def get(phase: String): Option[Map[() => Future[Done], Vector[String]]] = Option(registeredTasks.get(phase))
+    def get(phaseName: String): Option[PhaseDefinition] = Option(registeredPhases.get(phaseName))
+
+    def totalDuration(): FiniteDuration = {
+      import akka.util.ccompat.JavaConverters._
+      registeredPhases.keySet.asScala.foldLeft(Duration.Zero) {
+        case (acc, phase) =>
+          acc + timeout(phase)
+      }
+    }
+
+    def register(phaseName: String)(task: () => Future[Done], name: String): Cancellable = {
+      val cancellable: TaskDefinition = TaskDefinition.create(phaseName, task, name)
+
+      registeredPhases.merge(
+        phaseName,
+        StrictPhaseDefinition.single(cancellable),
+        (previous, incoming) => previous.merge(incoming))
+      cancellable
     }
   }
   private val runStarted = new AtomicReference[Option[Reason]](None)
@@ -448,9 +484,7 @@ final class CoordinatedShutdown private[akka] (
    *
    * Adding a task to a phase does not remove any other tasks from the phase.
    *
-   * If the same task is added multiple times, each addition must be canceled
-   * in order to remove the task from the phase. Such a task is in any case not
-   * run more than once.
+   * If the same task is added multiple times, each addition will be run unless cancelled.
    *
    * Tasks should typically be registered as early as possible -- once coordinated
    * shutdown begins, tasks may be added without ever being run. A task may add tasks
@@ -459,7 +493,7 @@ final class CoordinatedShutdown private[akka] (
   def addCancellableTask(phase: String, taskName: String)(task: () => Future[Done]): Cancellable = {
     require(
       knownPhases(phase),
-      s"Unknown phase [$phase], known phases [${knownPhases}]. All phases (along with their optional dependencies) must be defined in configuration")
+      s"Unknown phase [$phase], known phases [$knownPhases]. All phases (along with their optional dependencies) must be defined in configuration")
     require(
       taskName.nonEmpty,
       "Set a task name when adding tasks to the Coordinated Shutdown. " +
@@ -475,9 +509,7 @@ final class CoordinatedShutdown private[akka] (
    *
    * Adding a task to a phase does not remove any other tasks from the phase.
    *
-   * If the same task is added multiple times, each addition must be canceled
-   * in order to remove the task from the phase. Such a task is in any case not
-   * run more than once.
+   * If the same task is added multiple times, each addition will be run unless cancelled.
    *
    * Tasks should typically be registered as early as possible -- once coordinated
    * shutdown begins, tasks may be added without ever being run. A task may add tasks
@@ -615,67 +647,43 @@ final class CoordinatedShutdown private[akka] (
    */
   def run(reason: Reason, fromPhase: Option[String]): Future[Done] = {
     if (runStarted.compareAndSet(None, Some(reason))) {
-      implicit val ec = system.dispatchers.internalDispatcher
+      implicit val ec: ExecutionContext = system.dispatchers.internalDispatcher
       val debugEnabled = log.isDebugEnabled
       log.debug("Running CoordinatedShutdown with reason [{}]", reason)
       def loop(remainingPhases: List[String]): Future[Done] = {
         remainingPhases match {
           case Nil => Future.successful(Done)
-          case phase :: remaining if !phases(phase).enabled =>
-            tasks.get(phase).foreach { phaseDef =>
-              log.info("Phase [{}] disabled through configuration, skipping [{}] tasks", phase, phaseDef.size)
+          case phaseName :: remaining if !phases(phaseName).enabled =>
+            tasks.get(phaseName).foreach { phaseDef =>
+              log.info(s"Phase [{}] disabled through configuration, skipping [{}] tasks.", phaseName, phaseDef.size)
             }
             loop(remaining)
-          case phase :: remaining =>
-            val phaseResult = tasks.get(phase) match {
+          case phaseName :: remaining =>
+            val phaseResult = tasks.get(phaseName) match {
               case None =>
-                if (debugEnabled) log.debug("Performing phase [{}] with [0] tasks", phase)
+                if (debugEnabled) log.debug("Performing phase [{}] with [0] tasks", phaseName)
                 Future.successful(Done)
               case Some(phaseDef) =>
                 if (debugEnabled) {
-                  log.debug(
-                    "Performing phase [{}] with [{}] tasks: [{}]",
-                    phase,
-                    phaseDef.size,
-                    phaseDef.values.flatten.mkString(", "))
+                  log.debug("Performing phase [{}] with [{}] tasks.", phaseName, phaseDef.size)
                 }
-                val recoverEnabled = phases(phase).recover
-                val result = Future
-                  .sequence(phaseDef.map {
-                    case (task, names) =>
-                      try {
-                        val r = task()
-                        if (recoverEnabled) r.recover {
-                          case NonFatal(e) =>
-                            log.warning("Task [{}] failed in phase [{}]: {}", names.mkString(", "), phase, e.getMessage)
-                            Done
-                        } else r
-                      } catch {
-                        case NonFatal(e) =>
-                          // in case task.apply throws
-                          if (recoverEnabled) {
-                            log.warning("Task [{}] failed in phase [{}]: {}", names.mkString(", "), phase, e.getMessage)
-                            Future.successful(Done)
-                          } else
-                            Future.failed(e)
-                      }
-                  })
-                  .map(_ => Done)
-                val timeout = phases(phase).timeout
+                val recoverEnabled = phases(phaseName).recover
+                val result = phaseDef.run(recoverEnabled)
+                val timeout = phases(phaseName).timeout
                 val deadline = Deadline.now + timeout
                 val timeoutFut = try {
                   after(timeout, system.scheduler) {
-                    if (phase == CoordinatedShutdown.PhaseActorSystemTerminate && deadline.hasTimeLeft) {
+                    if (phaseName == CoordinatedShutdown.PhaseActorSystemTerminate && deadline.hasTimeLeft) {
                       // too early, i.e. triggered by system termination
                       result
                     } else if (result.isCompleted)
                       Future.successful(Done)
                     else if (recoverEnabled) {
-                      log.warning("Coordinated shutdown phase [{}] timed out after {}", phase, timeout)
+                      log.warning("Coordinated shutdown phase [{}] timed out after {}", phaseName, timeout)
                       Future.successful(Done)
                     } else
                       Future.failed(
-                        new TimeoutException(s"Coordinated shutdown phase [$phase] timed out after $timeout"))
+                        new TimeoutException(s"Coordinated shutdown phase [$phaseName] timed out after $timeout"))
                   }
                 } catch {
                   case _: IllegalStateException =>

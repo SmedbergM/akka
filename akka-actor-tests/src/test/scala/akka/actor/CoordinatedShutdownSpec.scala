@@ -145,34 +145,92 @@ class CoordinatedShutdownSpec
           Done
         }
       }
-      co.addCancellableTask("b", "b3") { () =>
-        Future {
-          testActor ! "B"
-          Done
-        }
-      }
-      val cancellableTask = co.addCancellableTask("b", "b4") { () =>
-        Future {
-          testActor ! "B-cancel"
-          Done
-        }
-      }
-      val counterC = new AtomicInteger()
-      val taskC = () =>
-        Future {
-          counterC.incrementAndGet()
-          Done
-        }
-      co.addTask("c", "c1")(taskC)
-      co.addTask("c", "c2")(taskC)
-      cancellableTask.cancel()
-      co.addTask("d", "d1") { () =>
-        testActor ! "D"
+      co.addTask("c", "c1") { () =>
+        testActor ! "C"
         Future.successful(Done)
       }
-      Await.result(co.run(UnknownReason), remainingOrDefault)
-      counterC.get shouldEqual 1 // adding the same function twice should only result in it running once
-      receiveN(5) should ===(List("A", "B", "B", "B", "D"))
+      whenReady(co.run(UnknownReason)) { _ =>
+        receiveN(4) should ===(List("A", "B", "B", "C"))
+      }
+    }
+
+    "cancel tasks" in {
+      import system.dispatcher
+      val phases = Map("a" -> emptyPhase, "b" -> phase("a"))
+      val co = new CoordinatedShutdown(extSys, phases)
+
+      val task0Counter = new AtomicInteger()
+
+      val task0: () => Future[Done] = () => Future {
+        task0Counter.incrementAndGet()
+        Done
+      }
+
+      co.addCancellableTask("a", "task0-copy0")(task0)
+      co.addCancellableTask("a", "task0-copy1")(task0)
+      val cancellable0 = co.addCancellableTask("a", "task0-copy2")(task0)
+
+      object Task1 { // We can also add a method as a task
+        val counter = new AtomicInteger()
+
+        private def taskMethod(): Future[Done] = Future {
+          counter.incrementAndGet()
+          Done
+        }
+
+        def register(phase: String, name: String): Cancellable = co.addCancellableTask(phase, name)(taskMethod)
+      }
+
+      Task1.register("b", "task1-copy0")
+      Task1.register("b", "task1-copy1")
+      val cancellable1 = Task1.register("b", "task1-copy2")
+
+      // Adding the same task twice under the same phase/name will still run it twice
+      val task2counter = new AtomicInteger()
+      co.addCancellableTask("a", "task2")(() => Future {
+        task2counter.incrementAndGet()
+        Done
+      })
+      co.addCancellableTask("a", "task2")(() => Future {
+        task2counter.incrementAndGet()
+        Done
+      })
+      val cancellable2 = co.addCancellableTask("a", "task2")(() => Future {
+        task2counter.incrementAndGet()
+        Done
+      })
+
+      object TaskAB { // tests cancellation by tasks in a previous/later phase
+        val promiseA = Promise[Unit]
+        val promiseB = Promise[Unit]
+        val taskA: Cancellable = co.addCancellableTask("a", "task-a"){ () => Future {
+          taskB.cancel()
+          promiseA.trySuccess(log.info("Completing Promise A"))
+          Done
+        }}
+        val taskB: Cancellable = co.addCancellableTask("b", "task-b"){ () => Future {
+          taskA.cancel()
+          promiseB.trySuccess(log.info("Completing Promise B"))
+          Done
+        }}
+      }
+
+      TaskAB.promiseA.isCompleted shouldBe false
+      TaskAB.promiseB.isCompleted shouldBe false
+      TaskAB.taskA.isCancelled shouldBe false
+      TaskAB.taskB.isCancelled shouldBe false
+
+      cancellable0.cancel()
+      cancellable1.cancel()
+      cancellable2.cancel()
+
+      whenReady(co.run(UnknownReason)) { _ =>
+        task0Counter.get shouldEqual 2
+        Task1.counter.get shouldEqual 2
+        task2counter.get shouldEqual 2
+        TaskAB.promiseA.isCompleted shouldBe true
+        TaskAB.promiseB.isCompleted shouldBe false
+      }
     }
 
     "run from a given phase" in {

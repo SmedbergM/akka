@@ -444,7 +444,6 @@ final class CoordinatedShutdown private[akka] (
       val empty: StrictPhaseDefinition = StrictPhaseDefinition(Set.empty)
     }
 
-    //def get(phase: String): Option[Map[() => Future[Done], Vector[String]]] = Option(registeredTasks.get(phase))
     def get(phaseName: String): Option[PhaseDefinition] = Option(registeredPhases.get(phaseName))
 
     def totalDuration(): FiniteDuration = {

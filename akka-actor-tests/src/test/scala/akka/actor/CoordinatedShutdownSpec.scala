@@ -127,7 +127,7 @@ class CoordinatedShutdownSpec
 
     "run ordered phases" in {
       import system.dispatcher
-      val phases = Map("a" -> emptyPhase, "b" -> phase("a"), "c" -> phase("b", "a"), "d" -> phase("c", "b", "a"))
+      val phases = Map("a" -> emptyPhase, "b" -> phase("a"), "c" -> phase("b", "a"))
       val co = new CoordinatedShutdown(extSys, phases)
       co.addTask("a", "a1") { () =>
         testActor ! "A"

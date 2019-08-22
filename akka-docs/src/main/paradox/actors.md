@@ -1080,10 +1080,10 @@ Java
 :  @@snip [ActorDocTest.java](/akka-docs/src/test/java/jdocs/actor/ActorDocTest.java) { #coordinated-shutdown-cancellable }
 
 The returned @scala[`Future[Done]`] @java[`CompletionStage<Done>`] should be completed when the task is completed. The task name parameter
-is used for debugging, logging, and identifying whether the provided task has been registered multiple times.
+is used only for debugging and logging.
 
 Tasks added to the same phase are executed in parallel without any ordering assumptions.
-Next phase will not start until all tasks of previous phase have been completed.
+The next phase will not start until all tasks of previous phase have been completed.
 
 If tasks are not completed within a configured timeout (see @ref:[reference.conf](general/configuration.md#config-akka-actor))
 the next phase will be started anyway. It is possible to configure `recover=off` for a phase

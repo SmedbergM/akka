@@ -5,26 +5,25 @@
 package akka.stream.scaladsl
 
 import akka.Done
-import akka.actor.{ PoisonPill, Status }
+import akka.actor.ActorRef
+import akka.actor.PoisonPill
+import akka.actor.Status
+import akka.stream._
 import akka.stream.testkit.Utils._
 import akka.stream.testkit._
 import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit.scaladsl._
-import akka.stream._
-import scala.concurrent.duration._
-
-import akka.actor.ActorRef
 import org.reactivestreams.Publisher
 
+import scala.concurrent.duration._
+
 class ActorRefSourceSpec extends StreamSpec {
-  private implicit val materializer = ActorMaterializer()
 
   "A ActorRefSource" must {
 
     "emit received messages to the stream" in {
       val s = TestSubscriber.manualProbe[Int]()
-      val materializer2 = ActorMaterializer()
-      val ref = Source.actorRef(10, OverflowStrategy.fail).to(Sink.fromSubscriber(s)).run()(materializer2)
+      val ref = Source.actorRef(10, OverflowStrategy.fail).to(Sink.fromSubscriber(s)).run()
       val sub = s.expectSubscription()
       sub.request(2)
       ref ! 1
@@ -212,7 +211,7 @@ class ActorRefSourceSpec extends StreamSpec {
 
     "be possible to run immediately, reproducer of #26714" in {
       (1 to 100).foreach { _ =>
-        val mat = ActorMaterializer()
+        val mat = Materializer(system)
         val source: Source[String, ActorRef] = Source.actorRef[String](10000, OverflowStrategy.fail)
         val (_: ActorRef, _: Publisher[String]) =
           source.toMat(Sink.asPublisher(false))(Keep.both).run()(mat)

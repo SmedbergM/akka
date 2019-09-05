@@ -5,8 +5,8 @@ will by default be stopped.
 
 @@@ note
 
-An important difference between Typed and Untyped actors is that Typed actors are by default stopped if
-an exception is thrown and no supervision strategy is defined while in Untyped they are restarted.
+An important difference between Typed and Classic actors is that Typed actors are by default stopped if
+an exception is thrown and no supervision strategy is defined while in Classic they are restarted.
 
 @@@
 
@@ -26,7 +26,7 @@ with a fresh state that we know is valid.
 
 ## Supervision
 
-In Akka Typed this "somewhere else" is called supervision. Supervision allows you to declaratively describe what should happen when a certain type of exceptions are thrown inside an actor. To use supervision the actual Actor behavior is wrapped using `Behaviors.supervise`, for example to restart on `IllegalStateExceptions`:
+In Akka this "somewhere else" is called supervision. Supervision allows you to declaratively describe what should happen when a certain type of exceptions are thrown inside an actor. To use supervision the actual Actor behavior is wrapped using `Behaviors.supervise`, for example to restart on `IllegalStateExceptions`:
 
 
 Scala
@@ -61,11 +61,22 @@ Scala
 Java
 :  @@snip [SupervisionCompileOnlyTest.java](/akka-actor-typed-tests/src/test/java/jdocs/akka/typed/supervision/SupervisionCompileOnlyTest.java) { #multiple }
 
-For a full list of strategies see the public methods on `SupervisorStrategy`
+For a full list of strategies see the public methods on @apidoc[akka.actor.typed.SupervisorStrategy].
+
+@@@ note
+
+When the behavior is restarted the original `Behavior` that was given to `Behaviors.supervise` is re-installed,
+which means that if it contains mutable state it must be a factory via `Behaviors.setup`. When using the
+object-oriented style with a class extending `AbstractBehavior` it's always recommended to create it via
+`Behaviors.setup` as described in @ref:[Behavior factory method](style-guide.md#behavior-factory-method).
+For the function style there is typically no need for the factory if the state is captured in immutable
+parameters.
+@@@
 
 ### Wrapping behaviors
 
-It is very common to store state by changing behavior e.g.
+With the @ref:[functional style](style-guide.md#functional-versus-object-oriented-style) it is very common
+to store state by changing behavior e.g.
 
 Scala
 :  @@snip [SupervisionCompileOnly.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/supervision/SupervisionCompileOnly.scala) { #wrap }
@@ -114,7 +125,7 @@ restarted.
 ## Bubble failures up through the hierarchy
 
 In some scenarios it may be useful to push the decision about what to do on a failure upwards in the Actor hierarchy
- and let the parent actor handle what should happen on failures (in untyped Akka Actors this is how it works by default).
+ and let the parent actor handle what should happen on failures (in classic Akka Actors this is how it works by default).
 
 For a parent to be notified when a child is terminated it has to `watch` the child. If the child was stopped because of
 a failure the `ChildFailed` signal will be received which will contain the cause. `ChildFailed` extends `Terminated` so if

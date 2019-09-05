@@ -4,6 +4,7 @@
 
 package akka.actor.typed.scaladsl
 
+import akka.actor.ClassicActorContextProvider
 import akka.actor.typed._
 import akka.annotation.DoNotInherit
 import akka.util.Timeout
@@ -35,7 +36,7 @@ import akka.annotation.InternalApi
  * Not for user extension.
  */
 @DoNotInherit
-trait ActorContext[T] extends TypedActorContext[T] {
+trait ActorContext[T] extends TypedActorContext[T] with ClassicActorContextProvider {
 
   /**
    * Get the `javadsl` of this `ActorContext`.
@@ -286,7 +287,7 @@ trait ActorContext[T] extends TypedActorContext[T] {
    * @tparam Req The request protocol, what the other actor accepts
    * @tparam Res The response protocol, what the other actor sends back
    */
-  def ask[Req, Res](target: RecipientRef[Req])(createRequest: ActorRef[Res] => Req)(
+  def ask[Req, Res](target: RecipientRef[Req], createRequest: ActorRef[Res] => Req)(
       mapResponse: Try[Res] => T)(implicit responseTimeout: Timeout, classTag: ClassTag[Res]): Unit
 
   /**

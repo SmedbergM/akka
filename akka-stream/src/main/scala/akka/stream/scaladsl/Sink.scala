@@ -4,24 +4,30 @@
 
 package akka.stream.scaladsl
 
-import akka.{ Done, NotUsed }
-import akka.dispatch.ExecutionContexts
-import akka.actor.{ ActorRef, Status }
+import akka.actor.ActorRef
+import akka.actor.Status
 import akka.annotation.InternalApi
+import akka.dispatch.ExecutionContexts
 import akka.stream.impl.Stages.DefaultAttributes
 import akka.stream.impl._
 import akka.stream.impl.fusing.GraphStages
 import akka.stream.stage._
-import akka.stream.{ javadsl, _ }
-import org.reactivestreams.{ Publisher, Subscriber }
+import akka.stream.javadsl
+import akka.stream._
+import akka.util.ccompat._
+import akka.Done
+import akka.NotUsed
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
 
 import scala.annotation.tailrec
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success, Try }
-import scala.collection.immutable
-import akka.util.ccompat._
-
 import scala.annotation.unchecked.uncheckedVariance
+import scala.collection.immutable
+import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
 /**
  * A `Sink` is a set of stream processing steps that has one open input.
@@ -46,6 +52,9 @@ final class Sink[-In, +Mat](override val traversalBuilder: LinearTraversalBuilde
   /**
    * Connect this `Sink` to a `Source` and run it. The returned value is the materialized value
    * of the `Source`, e.g. the `Subscriber` of a [[Source#subscriber]].
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def runWith[Mat2](source: Graph[SourceShape[In], Mat2])(implicit materializer: Materializer): Mat2 =
     Source.fromGraph(source).to(this).run()
@@ -145,11 +154,21 @@ object Sink {
 
   /**
    * Defers the creation of a [[Sink]] until materialization. The `factory` function
+   * exposes [[Materializer]] which is going to be used during materialization and
+   * [[Attributes]] of the [[Sink]] returned by this method.
+   */
+  def fromMaterializer[T, M](factory: (Materializer, Attributes) => Sink[T, M]): Sink[T, Future[M]] =
+    Sink.fromGraph(new SetupSinkStage(factory))
+
+  /**
+   * Defers the creation of a [[Sink]] until materialization. The `factory` function
    * exposes [[ActorMaterializer]] which is going to be used during materialization and
    * [[Attributes]] of the [[Sink]] returned by this method.
    */
+  @deprecated("Use 'fromMaterializer' instead", "2.6.0")
   def setup[T, M](factory: (ActorMaterializer, Attributes) => Sink[T, M]): Sink[T, Future[M]] =
-    Sink.fromGraph(new SetupSinkStage(factory))
+    Sink.fromGraph(new SetupSinkStage((materializer, attributes) =>
+      factory(ActorMaterializerHelper.downcast(materializer), attributes)))
 
   /**
    * Helper to create [[Sink]] from `Subscriber`.

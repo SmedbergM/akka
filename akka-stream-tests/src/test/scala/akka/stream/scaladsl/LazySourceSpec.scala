@@ -8,20 +8,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.Done
 import akka.stream.impl.LazySource
-import akka.stream.stage.{ GraphStage, GraphStageLogic }
+import akka.stream.stage.GraphStage
+import akka.stream.stage.GraphStageLogic
 import akka.stream.testkit.Utils.TE
 import akka.stream.testkit.scaladsl.StreamTestKit._
-import akka.stream.testkit.{ StreamSpec, TestPublisher, TestSubscriber }
-import akka.stream.{ ActorMaterializer, Attributes, Outlet, SourceShape }
-import akka.testkit.DefaultTimeout
+import akka.stream.testkit.StreamSpec
+import akka.stream.testkit.TestPublisher
+import akka.stream.testkit.TestSubscriber
+import akka.stream.{ Attributes, KillSwitches, Outlet, SourceShape }
+import akka.testkit.{ DefaultTimeout, TestProbe }
 import org.scalatest.concurrent.ScalaFutures
 
 import scala.collection.immutable.Seq
 import scala.concurrent.Future
 
 class LazySourceSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
-
-  implicit val materializer = ActorMaterializer()
 
   "A lazy source" should {
     "work like a normal source, happy path" in assertAllStagesStopped {
@@ -83,6 +84,25 @@ class LazySourceSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       probe.cancel()
     }
 
+    "propagate downstream cancellation cause when inner source has been materialized" in {
+      val probe = TestProbe()
+      val (doneF, killswitch) =
+        Source
+          .lazily(() =>
+            Source.maybe[Int].watchTermination()(Keep.right).mapMaterializedValue { done =>
+              probe.ref ! Done
+              done
+            })
+          .mapMaterializedValue(_.flatten)
+          .viaMat(KillSwitches.single)(Keep.both)
+          .to(Sink.ignore)
+          .run()
+      val boom = TE("boom")
+      probe.expectMsg(Done)
+      killswitch.abort(boom)
+      doneF.failed.futureValue should ===(boom)
+    }
+
     "fail stage when upstream fails" in assertAllStagesStopped {
       val outProbe = TestSubscriber.probe[Int]()
       val inProbe = TestPublisher.probe[Int]()
@@ -112,6 +132,7 @@ class LazySourceSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       result.failed.futureValue should ===(matFail)
 
     }
+
   }
 
 }

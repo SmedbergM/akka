@@ -10,62 +10,39 @@ If you are still using Scala 2.11 then you must upgrade to 2.12 or 2.13
 
 ## Removed features that were deprecated
 
-### akka-camel removed
+After being deprecated since 2.5.0, the following have been removed in Akka 2.6.
 
-After being deprecated in 2.5.0, the akka-camel module has been removed in 2.6.
-As an alternative we recommend [Alpakka](https://doc.akka.io/docs/alpakka/current/).
+* akka-camel module
+    - As an alternative we recommend [Alpakka](https://doc.akka.io/docs/alpakka/current/).
+    - This is of course not a drop-in replacement. If there is community interest we are open to setting up akka-camel as a separate community-maintained repository.
+* akka-agent module
+    - If there is interest it may be moved to a separate, community-maintained repository.
+* akka-contrib module
+    - To migrate, take the components you are using from [Akka 2.5](https://github.com/akka/akka/tree/release-2.5/akka-contrib) and include them in your own project or library under your own package name.
+* Actor DSL
+    - Actor DSL is a rarely used feature. Use plain `system.actorOf` instead of the DSL to create Actors if you have been using it.
+* `akka.stream.extra.Timing` operator
+    - If you need it you can now find it in `akka.stream.contrib.Timed` from [Akka Stream Contrib](https://github.com/akka/akka-stream-contrib/blob/master/src/main/scala/akka/stream/contrib/Timed.scala).
+* Netty UDP (Classic remoting over UDP)
+    - To continue to use UDP configure @ref[Artery UDP](../remoting-artery.md#configuring-ssl-tls-for-akka-remoting) or migrate to Artery TCP.
+    - A full cluster restart is required to change to Artery.
+* `UntypedActor`
+    - Use `AbstractActor` instead.
+* `JavaTestKit`
+    - Use `akka.testkit.javadsl.TestKit` instead.
+* `UntypedPersistentActor`
+    - Use `AbstractPersistentActor` instead.
+* `UntypedPersistentActorWithAtLeastOnceDelivery` 
+    - Use @apidoc[AbstractPersistentActorWithAtLeastOnceDelivery] instead.
 
-This is of course not a drop-in replacement. If there is community interest we
-are open to setting up akka-camel as a separate community-maintained
-repository.
+After being deprecated since 2.2, the following have been removed in Akka 2.6.
 
-### akka-agent removed
+* `actorFor` 
+    - Use `ActorSelection` instead.
+    
+### Removed methods
 
-After being deprecated in 2.5.0, the akka-agent module has been removed in 2.6.
-If there is interest it may be moved to a separate, community-maintained
-repository.
-
-### akka-contrib removed
-
-The akka-contrib module was deprecated in 2.5 and has been removed in 2.6.
-To migrate, take the components you are using from [Akka 2.5](https://github.com/akka/akka/tree/release-2.5/akka-contrib)
-and include them in your own project or library under your own package name.
-
-### Actor DSL removed
-
-Actor DSL is a rarely used feature and has been deprecated since `2.5.0`.
-Use plain `system.actorOf` instead of the DSL to create Actors if you have been using it.
-
-### Timing operator removed
-
-`akka.stream.extra.Timing` has been removed. If you need it you can now find it in `akka.stream.contrib.Timed` from
- [Akka Stream Contrib](https://github.com/akka/akka-stream-contrib/blob/master/src/main/scala/akka/stream/contrib/Timed.scala).
-
-### actorFor removed
-
-`actorFor` has been deprecated since `2.2`. Use `ActorSelection` instead.
-
-### Netty UDP removed
-
-Classic remoting over UDP has been deprecated since `2.5.0` and now has been removed.
-To continue to use UDP configure @ref[Artery UDP](../remoting-artery.md#configuring-ssl-tls-for-akka-remoting) or migrate to Artery TCP.
-A full cluster restart is required to change to Artery.
-
-### Untyped actor removed
-
-`UntypedActor` has been depcated since `2.5.0`. Use `AbstractActor` instead.
-
-### UntypedPersistentActor removed
-
-Use `AbstractPersistentActor` instead.
-
-### UntypedPersistentActorWithAtLeastOnceDelivery removed
-
-Use @apidoc[AbstractPersistentActorWithAtLeastOnceDelivery] instead.
-
-### Various removed methods
-
-* `Logging.getLogger(UntypedActor)` Untyped actor has been removed, use AbstractActor instead.
+* `Logging.getLogger(UntypedActor)` `UntypedActor` has been removed, use `AbstractActor` instead.
 * `LoggingReceive.create(Receive, ActorContext)` use `AbstractActor.Receive` instead.
 * `ActorMaterialzierSettings.withAutoFusing` disabling fusing is no longer possible.
 * `AbstractActor.getChild` use `findChild` instead.
@@ -76,9 +53,6 @@ Use @apidoc[AbstractPersistentActorWithAtLeastOnceDelivery] instead.
 * `Source.actorSubscriber`, use `Source.fromGraph` instead.
 * `Source.actorActorPublisher`, use `Source.fromGraph` instead.
 
-### JavaTestKit removed
-
-The `JavaTestKit` has been deprecated since `2.5.0`. Use `akka.testkit.javadsl.TestKit` instead.
 
 ## Deprecated features
 
@@ -151,13 +125,16 @@ The configuration for Artery is different, so you might have to revisit any cust
 @ref:[reference configuration for Artery](../general/configuration.md#config-akka-remote-artery) and
 @ref:[reference configuration for classic remoting](../general/configuration.md#config-akka-remote).
 
+@@@ note
+
+For more details on rolling updates with this migration see the @ref:[shutdown and startup](../additional/rolling-updates.md#migrating-from-classic-remoting-to-artery) section.
+
+@@@
+
 Configuration that is likely required to be ported:
 
 * `akka.remote.netty.tcp.hostname` => `akka.remote.artery.canonical.hostname`
 * `akka.remote.netty.tcp.port`=> `akka.remote.artery.canonical.port`
-
-One thing to be aware of is that rolling update from classic remoting to Artery is not supported since the protocol
-is completely different. It will require a full cluster shutdown and new startup.
 
 If using SSL then `tcp-tls` needs to be enabled and setup. See @ref[Artery docs for SSL](../remoting-artery.md#configuring-ssl-tls-for-akka-remoting)
 for how to do this.
@@ -199,6 +176,19 @@ Classic remoting is deprecated but can be used in `2.6.` Explicitly disable Arte
 specific to classic remoting needs to be moved to `akka.remote.classic`. To see which configuration options
 are specific to classic search for them in: [`akka-remote/reference.conf`](/akka-remote/src/main/resources/reference.conf)
 
+### akka-protobuf
+
+`akka-protobuf` was never intended to be used by end users but perhaps this was not well-documented.
+Applications should use standard Protobuf dependency instead of `akka-protobuf`. The artifact is still
+published, but the transitive dependency to `akka-protobuf` has been removed.
+
+Akka is now using Protobuf version 3.9.0 for serialization of messages defined by Akka.
+
+### Cluster Client
+
+Cluster client has been deprecated as of 2.6 in favor of [Akka gRPC](https://doc.akka.io/docs/akka-grpc/current/index.html).
+It is not advised to build new applications with Cluster client, and existing users @ref[should migrate to Akka gRPC](../cluster-client.md#migration-to-akka-grpc).
+
 ## Java Serialization
 
 Java serialization is known to be slow and [prone to attacks](https://community.hpe.com/t5/Security-Research/The-perils-of-Java-deserialization/ba-p/6838995)
@@ -222,35 +212,7 @@ akka.actor.warn-about-java-serializer-usage = off
 
 ### Rolling update
 
-You can replace Java serialization, if you use that, with for example the new
-@ref:[Serialization with Jackson](../serialization-jackson.md) and still be able to perform a rolling updates
-without bringing down the entire cluster.
-
-The procedure for changing from Java serialization to Jackson would look like:
-
-1. Rolling update from 2.5.24 (or later) to 2.6.0
-    * Use config `allow-java-serialization=on`.
-    * Roll out the change.
-    * Java serialization will be used as before.
-    * This step is optional and you could combine it with next step if you like, but could be good to
-      make one change at a time.
-1. Rolling update to support deserialization but not enable serialization
-    * Change message classes by adding the marker interface and possibly needed annotations as
-      described in @ref:[Serialization with Jackson](../serialization-jackson.md).
-    * Test the system with the new serialization in a new test cluster (no rolling update).
-    * Remove the binding for the marker interface, so that Jackson is not used for serialization yet.
-    * Roll out the change.
-    * Java serialization is still used, but this version is prepared for next roll out.
-1. Rolling update to enable serialization with Jackson.
-    * Add the binding to the marker interface to the Jackson serializer.
-    * Roll out the change.
-    * Old nodes will still send messages with Java serialization, and that can still be deserialized by new nodes.
-    * New nodes will send messages with Jackson serialization, and old node can deserialize those because they were
-      prepared in previous roll out.
-1. Rolling update to disable Java serialization
-    * Remove `allow-java-serialization` config, to use the default `allow-java-serialization=off`.
-    * Remove `.warn-about-java-serializer-usage` config if you had changed that, to use the default `.warn-about-java-serializer-usage=on`.
-    * Roll out the change.
+Please see the @ref:[rolling update procedure from Java serialization to Jackson](../additional/rolling-updates.md#from-java-serialization-to-jackson).
 
 ### Java serialization in consistent hashing
 
@@ -353,8 +315,8 @@ the default dispatcher has been adjusted down to `1.0` which means the number of
 #### waiting-for-state-timeout reduced to 2s
 
 This has been reduced to speed up ShardCoordinator initialization in smaller clusters.
-The read from ddata is a ReadMajority, for small clusters (< majority-min-cap) every node needs to respond
-so is more likely to timeout if there are nodes restarting e.g. when there is a rolling re-deploy happening.
+The read from ddata is a ReadMajority. For small clusters (< majority-min-cap) every node needs to respond
+so it is more likely to timeout if there are nodes restarting, for example when there is a rolling re-deploy happening.
 
 #### Passivate idle entity
 
@@ -402,11 +364,23 @@ and then it will behave as in Akka 2.5.x:
 akka.coordinated-shutdown.run-by-actor-system-terminate = off
 ```
 
+### Scheduler not running tasks when shutdown
+
+When the `ActorSystem` was shutting down and the `Scheduler` was closed all outstanding scheduled tasks were run,
+which was needed for some internals in Akka but a surprising behavior for end users. Therefore this behavior has
+changed in Akka 2.6.x and outstanding tasks are not run when the system is terminated.
+
+Instead, `system.registerOnTermination` or `CoordinatedShutdown` can be used for running such tasks when the shutting
+down.
+
 ### IOSources & FileIO
 
 `FileIO.toPath`, `StreamConverters.fromInputStream`, and `StreamConverters.fromOutputStream` now always fail the materialized value in case of failure. 
 It is no longer required to both check the materialized value and the `Try[Done]` inside the @apidoc[IOResult]. In case of an IO failure
 the exception will be @apidoc[IOOperationIncompleteException] instead of @apidoc[AbruptIOTerminationException].
+
+Additionally when downstream of the IO-sources cancels with a failure, the materialized value 
+is failed with that failure rather than completed successfully.
 
 ### Akka now uses Fork Join Pool from JDK
 
@@ -447,14 +421,19 @@ The materialized value for `StreamRefs.sinkRef` and `StreamRefs.sourceRef` is no
 
 ## Akka Typed
 
+### Naming convention changed
+
+In needing a way to distinguish the new APIs in code and docs from the original, Akka used the naming
+convention `untyped`. All references of the original have now been changed to `classic`. The 
+reference of the new APIs as `typed` is going away as it becomes the primary APIs.
+
 ### Receptionist has moved
 
 The receptionist had a name clash with the default Cluster Client Receptionist at `/system/receptionist` and will now 
 instead either run under `/system/localReceptionist` or `/system/clusterReceptionist`.
 
 The path change means that the receptionist information will not be disseminated between 2.5 and 2.6 nodes during a
-rolling update from 2.5 to 2.6 if you use Akka Typed. When all old nodes have been shutdown
-it will work properly again.
+rolling update from 2.5 to 2.6 if you use Akka Typed. See @ref:[rolling updates with typed Receptionist](../additional/rolling-updates.md#akka-typed-with-receptionist-or-cluster-receptionist)
 
 ### Cluster Receptionist using own Distributed Data
 
@@ -465,8 +444,7 @@ configuration.
 In 2.6 the Cluster Receptionist is using it's own independent instance of Distributed Data.
 
 This means that the receptionist information will not be disseminated between 2.5 and 2.6 nodes during a
-rolling update from 2.5 to 2.6 if you use Akka Typed. When all old nodes have been shutdown
-it will work properly again.
+rolling update from 2.5 to 2.6 if you use Akka Typed. See @ref:[rolling updates with typed Cluster Receptionist](../additional/rolling-updates.md#akka-typed-with-receptionist-or-cluster-receptionist)
 
 ### Akka Typed API changes
 
@@ -477,7 +455,7 @@ made before finalizing the APIs. Compared to Akka 2.5.x the source incompatible 
 * Factory method `Entity.ofPersistentEntity` is renamed to `Entity.ofEventSourcedEntity` in the Java API for Akka Cluster Sharding Typed.
 * New abstract class `EventSourcedEntityWithEnforcedReplies` in Java API for Akka Cluster Sharding Typed and corresponding factory method `Entity.ofEventSourcedEntityWithEnforcedReplies` to ease the creation of `EventSourcedBehavior` with enforced replies.
 * New method `EventSourcedEntity.withEnforcedReplies` added to Scala API to ease the creation of `EventSourcedBehavior` with enforced replies.
-* `ActorSystem.scheduler` previously gave access to the untyped `akka.actor.Scheduler` but now returns a typed specific `akka.actor.typed.Scheduler`.
+* `ActorSystem.scheduler` previously gave access to the classic `akka.actor.Scheduler` but now returns a typed specific `akka.actor.typed.Scheduler`.
   Additionally `schedule` method has been replaced by `scheduleWithFixedDelay` and `scheduleAtFixedRate`. Actors that needs to schedule tasks should
   prefer `Behaviors.withTimers`.
 * `TimerScheduler.startPeriodicTimer`, replaced by `startTimerWithFixedDelay` or `startTimerAtFixedRate`
@@ -497,8 +475,83 @@ made before finalizing the APIs. Compared to Akka 2.5.x the source incompatible 
 * `StashBuffer`s are now created with `Behaviors.withStash` rather than instantiating directly
 * To align with the Akka Typed style guide `SpawnProtocol` is now created through @scala[`SpawnProtocol()`]@java[`SpawnProtocol.create()`], the special `Spawn` message
   factories has been removed and the top level of the actor protocol is now `SpawnProtocol.Command`
+* `Future` removed from `ActorSystem.systemActorOf`.
 
 #### Akka Typed Stream API changes
 
 * `ActorSource.actorRef` relying on `PartialFunction` has been replaced in the Java API with a variant more suitable to be called by Java.
+* `toUntyped` has been renamed to `toClassic`.
 
+
+## Akka Stream changes
+
+### Materializer changes
+
+A default materializer is now provided out of the box. For the Java API just pass `system` when running streams,
+for Scala an implicit materializer is provided if there is an implicit `ActorSystem` available. This avoids leaking
+materializers and simplifies most stream use cases somewhat.
+
+The `ActorMaterializer` factories has been deprecated and replaced with a few corresponding factories in `akka.stream.Materializer`.
+New factories with per-materializer settings has not been provided but should instead be done globally through config or per stream, 
+see below for more details. 
+
+Having a default materializer available means that most, if not all, usages of Java `ActorMaterializer.create()` 
+and Scala `implicit val materializer = ActorMaterializer()` should be removed. 
+
+Details about the stream materializer can be found in [Actor Materializer Lifecycle](../stream/stream-flows-and-basics.md#actor-materializer-lifecycle)
+
+When using streams from typed the same factories and methods for creating materializers and running streams as from classic can now be used with typed. The  
+`akka.stream.typed.scaladsl.ActorMaterializer` and `akka.stream.typed.javadsl.ActorMaterializerFactory` that previously existed in the `akka-stream-typed` module has been removed.
+
+### Materializer settings deprecated
+
+The `ActorMaterializerSettings` class has been deprecated.
+
+All materializer settings are available as configuration to change the system default or through attributes that can be 
+used for individual streams when they are materialized.
+
+| Materializer setting   | Corresponding attribute | Setting |
+-------------------------|-------------------------|---------|
+| `initialInputBufferSize`                     | `Attributes.inputBuffer(initial, max)`          | `akka.stream.materializer.initial-input-buffer-size` |
+| `maxInputBufferSize`                         | `Attributes.inputBuffer(initial, max)`          | `akka.stream.materializer.max-input-buffer-size` |
+| `dispatcher`                                 | `ActorAttributes.dispatcher(name)`              | `akka.stream.materializer.dispatcher` |
+| `supervisionDecider`                         | `ActorAttributes.supervisionStrategy(strategy)` | na |
+| `debugLogging`                               | `ActorAttributes.debugLogging`                  | `akka.stream.materializer.debug-logging` |
+| `outputBurstLimit`                           | `ActorAttributes.outputBurstLimit`              | `akka.stream.materializer.output-burst-limit` |
+| `fuzzingMode`                                | `ActorAttributes.fuzzingMode`                   | `akka.stream.materializer.debug.fuzzing-mode` |
+| `autoFusing`                                 | no longer used (since 2.5.0)                    | na |
+| `maxFixedBufferSize`                         | `ActorAttributes.maxFixedBufferSize`            | `akka.stream.materializer.max-fixed-buffer-size` |
+| `syncProcessingLimit`                        | `ActorAttributes.syncProcessingLimit`           | `akka.stream.materializer.sync-processing-limit` |
+| `ioSettings.tcpWriteBufferSize`              | `Tcp.writeBufferSize`                           | `akka.stream.materializer.io.tcp.write-buffer-size` |
+| `streamRefSettings.bufferCapacity`           | `StreamRefAttributes.bufferCapacity`            | `akka.stream.materializer.stream-ref.buffer-capacity` |
+| `streamRefSettings.demandRedeliveryInterval` | `StreamRefAttributes.demandRedeliveryInterval`  | `akka.stream.materializer.stream-ref.demand-redelivery-interval` |
+| `streamRefSettings.subscriptionTimeout`      | `StreamRefAttributes.subscriptionTimeout`       | `akka.stream.materializer.stream-ref.subscription-timeout` |
+| `streamRefSettings.finalTerminationSignalDeadline` | `StreamRefAttributes.finalTerminationSignalDeadline` | `akka.stream.materializer.stream-ref.final-termination-signal-deadline` |
+| `blockingIoDispatcher`                       | `ActorAttributes.blockingIoDispatcher`          | `akka.stream.materializer.blocking-io-dispatcher` |
+| `subscriptionTimeoutSettings.mode`           | `ActorAttributes.streamSubscriptionTimeoutMode` | `akka.stream.materializer.subscription-timeout.mode` |
+| `subscriptionTimeoutSettings.timeout`        | `ActorAttributes.streamSubscriptionTimeout`     | `akka.stream.materializer.subscription-timeout.timeout` |
+
+Setting attributes on individual streams can be done like so:
+
+Scala
+:  @@snip [StreamAttributeDocSpec.scala](/akka-stream-tests/src/test/scala/akka/stream/StreamAttributeDocSpec.scala) { #attributes-on-stream }
+
+Java
+:  @@snip [StreamAttributeDocTest.java](/akka-stream-tests/src/test/java/akka/stream/StreamAttributeDocTest.java) { #attributes-on-stream }
+
+### Stream cancellation available upstream
+
+Previously an Akka streams stage or operator failed it was impossible to discern this from 
+the stage just cancelling. This has been improved so that when a stream stage fails the cause
+will be propagated upstream.
+
+The following operators have a slight change in behavior because of this:
+
+* `FileIO.fromPath`, `FileIO.fromFile` and `StreamConverters.fromInputStream`  will fail the materialized future with 
+  an `IOOperationIncompleteException` when downstream fails
+* `.watchTermination` will fail the materialized `Future` or `CompletionStage` rather than completing it when downstream fails
+
+This also means that custom `GraphStage` implementations should be changed to pass on the
+cancellation cause when downstream cancels by implementing the `OutHandler.onDownstreamFinish` signature 
+taking a `cause` parameter and calling `cancelStage(cause)` to pass the cause upstream. The old zero-argument 
+`onDownstreamFinish` method has been deprecated.   

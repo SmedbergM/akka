@@ -38,11 +38,11 @@ class GuardianStartupSpec extends WordSpec with Matchers with ScalaFutures {
       }
     }
 
-    "not start before untyped system initialization is complete" in {
+    "not start before classic system initialization is complete" in {
       var system: ActorSystem[String] = null
       val initialized = new CountDownLatch(1)
       val guardianBehavior = Behaviors.setup[String] { ctx =>
-        ctx.system.toUntyped.asInstanceOf[ActorSystemImpl].assertInitialized()
+        ctx.system.toClassic.asInstanceOf[ActorSystemImpl].assertInitialized()
         initialized.countDown()
         Behaviors.empty
       }

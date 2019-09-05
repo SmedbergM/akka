@@ -188,7 +188,7 @@ final class Flow[-In, +Out, +Mat](
    * | Resulting Flow            |
    * |                           |
    * | +------+        +------+  |
-   * | |      | ~Out~> |      | ~~> O2
+   * | |      | ~Out~> |      | ~~> O1
    * | | flow |        | bidi |  |
    * | |      | <~In~  |      | <~~ I2
    * | +------+        +------+  |
@@ -198,7 +198,7 @@ final class Flow[-In, +Out, +Mat](
    * value of the current flow (ignoring the [[BidiFlow]]’s value), use
    * [[Flow#joinMat[I2* joinMat]] if a different strategy is needed.
    */
-  def join[I2, O2, Mat2](bidi: Graph[BidiShape[Out, O2, I2, In], Mat2]): Flow[I2, O2, Mat] = joinMat(bidi)(Keep.left)
+  def join[I2, O1, Mat2](bidi: Graph[BidiShape[Out, O1, I2, In], Mat2]): Flow[I2, O1, Mat] = joinMat(bidi)(Keep.left)
 
   /**
    * Join this [[Flow]] to a [[BidiFlow]] to close off the “top” of the protocol stack:
@@ -207,7 +207,7 @@ final class Flow[-In, +Out, +Mat](
    * | Resulting Flow            |
    * |                           |
    * | +------+        +------+  |
-   * | |      | ~Out~> |      | ~~> O2
+   * | |      | ~Out~> |      | ~~> O1
    * | | flow |        | bidi |  |
    * | |      | <~In~  |      | <~~ I2
    * | +------+        +------+  |
@@ -219,8 +219,8 @@ final class Flow[-In, +Out, +Mat](
    * It is recommended to use the internally optimized `Keep.left` and `Keep.right` combiners
    * where appropriate instead of manually writing functions that pass through one of the values.
    */
-  def joinMat[I2, O2, Mat2, M](bidi: Graph[BidiShape[Out, O2, I2, In], Mat2])(
-      combine: (Mat, Mat2) => M): Flow[I2, O2, M] = {
+  def joinMat[I2, O1, Mat2, M](bidi: Graph[BidiShape[Out, O1, I2, In], Mat2])(
+      combine: (Mat, Mat2) => M): Flow[I2, O1, M] = {
     val newBidiShape = bidi.shape.deepCopy()
     val newFlowShape = shape.deepCopy()
 
@@ -287,6 +287,9 @@ final class Flow[-In, +Out, +Mat](
    * Connect the `Source` to this `Flow` and then connect it to the `Sink` and run it. The returned tuple contains
    * the materialized values of the `Source` and `Sink`, e.g. the `Subscriber` of a of a [[Source#subscriber]] and
    * and `Publisher` of a [[Sink#publisher]].
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def runWith[Mat1, Mat2](source: Graph[SourceShape[In], Mat1], sink: Graph[SinkShape[Out], Mat2])(
       implicit materializer: Materializer): (Mat1, Mat2) =
@@ -390,11 +393,21 @@ object Flow {
 
   /**
    * Defers the creation of a [[Flow]] until materialization. The `factory` function
+   * exposes [[Materializer]] which is going to be used during materialization and
+   * [[Attributes]] of the [[Flow]] returned by this method.
+   */
+  def fromMaterializer[T, U, M](factory: (Materializer, Attributes) => Flow[T, U, M]): Flow[T, U, Future[M]] =
+    Flow.fromGraph(new SetupFlowStage(factory))
+
+  /**
+   * Defers the creation of a [[Flow]] until materialization. The `factory` function
    * exposes [[ActorMaterializer]] which is going to be used during materialization and
    * [[Attributes]] of the [[Flow]] returned by this method.
    */
+  @deprecated("Use 'fromMaterializer' instead", "2.6.0")
   def setup[T, U, M](factory: (ActorMaterializer, Attributes) => Flow[T, U, M]): Flow[T, U, Future[M]] =
-    Flow.fromGraph(new SetupFlowStage(factory))
+    Flow.fromGraph(new SetupFlowStage((materializer, attributes) =>
+      factory(ActorMaterializerHelper.downcast(materializer), attributes)))
 
   /**
    * Creates a `Flow` from a `Sink` and a `Source` where the Flow's input
@@ -622,6 +635,9 @@ final case class RunnableGraph[+Mat](override val traversalBuilder: TraversalBui
 
   /**
    * Run this flow and return the materialized instance from the flow.
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def run()(implicit materializer: Materializer): Mat = materializer.materialize(this)
 
@@ -3292,8 +3308,8 @@ trait FlowOpsMat[+Out, +Mat] extends FlowOps[Out, Mat] {
   /**
    * Materializes to `Future[Done]` that completes on getting termination message.
    * The Future completes with success when received complete message from upstream or cancel
-   * from downstream. It fails with the same error when received error message from
-   * downstream.
+   * from downstream. It fails with the propagated error when received error message from
+   * upstream or downstream.
    *
    * It is recommended to use the internally optimized `Keep.left` and `Keep.right` combiners
    * where appropriate instead of manually writing functions that pass through one of the values.

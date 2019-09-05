@@ -100,6 +100,9 @@ final class Source[+Out, +Mat](
   /**
    * Connect this `Source` to a `Sink` and run it. The returned value is the materialized value
    * of the `Sink`, e.g. the `Publisher` of a [[akka.stream.scaladsl.Sink#publisher]].
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def runWith[Mat2](sink: Graph[SinkShape[Out], Mat2])(implicit materializer: Materializer): Mat2 =
     toMat(sink)(Keep.right).run()
@@ -111,6 +114,9 @@ final class Source[+Out, +Mat](
    * The returned [[scala.concurrent.Future]] will be completed with value of the final
    * function evaluation when the input stream ends, or completed with `Failure`
    * if there is a failure signaled in the stream.
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def runFold[U](zero: U)(f: (U, Out) => U)(implicit materializer: Materializer): Future[U] =
     runWith(Sink.fold(zero)(f))
@@ -122,6 +128,9 @@ final class Source[+Out, +Mat](
    * The returned [[scala.concurrent.Future]] will be completed with value of the final
    * function evaluation when the input stream ends, or completed with `Failure`
    * if there is a failure signaled in the stream.
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def runFoldAsync[U](zero: U)(f: (U, Out) => Future[U])(implicit materializer: Materializer): Future[U] =
     runWith(Sink.foldAsync(zero)(f))
@@ -138,6 +147,9 @@ final class Source[+Out, +Mat](
    * the reduce operator will fail its downstream with a [[NoSuchElementException]],
    * which is semantically in-line with that Scala's standard library collections
    * do in such situations.
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   def runReduce[U >: Out](f: (U, U) => U)(implicit materializer: Materializer): Future[U] =
     runWith(Sink.reduce(f))
@@ -148,6 +160,9 @@ final class Source[+Out, +Mat](
    * The returned [[scala.concurrent.Future]] will be completed with `Success` when reaching the
    * normal end of the stream, or completed with `Failure` if there is a failure signaled in
    * the stream.
+   *
+   * Note that the `ActorSystem` can be used as the implicit `materializer` parameter to use the
+   * [[akka.stream.SystemMaterializer]] for running the stream.
    */
   // FIXME: Out => Unit should stay, right??
   def runForeach(f: Out => Unit)(implicit materializer: Materializer): Future[Done] = runWith(Sink.foreach(f))
@@ -292,11 +307,21 @@ object Source {
 
   /**
    * Defers the creation of a [[Source]] until materialization. The `factory` function
+   * exposes [[Materializer]] which is going to be used during materialization and
+   * [[Attributes]] of the [[Source]] returned by this method.
+   */
+  def fromMaterializer[T, M](factory: (Materializer, Attributes) => Source[T, M]): Source[T, Future[M]] =
+    Source.fromGraph(new SetupSourceStage(factory))
+
+  /**
+   * Defers the creation of a [[Source]] until materialization. The `factory` function
    * exposes [[ActorMaterializer]] which is going to be used during materialization and
    * [[Attributes]] of the [[Source]] returned by this method.
    */
+  @deprecated("Use 'fromMaterializer' instead", "2.6.0")
   def setup[T, M](factory: (ActorMaterializer, Attributes) => Source[T, M]): Source[T, Future[M]] =
-    Source.fromGraph(new SetupSourceStage(factory))
+    Source.fromGraph(new SetupSourceStage((materializer, attributes) =>
+      factory(ActorMaterializerHelper.downcast(materializer), attributes)))
 
   /**
    * Helper to create [[Source]] from `Iterable`.

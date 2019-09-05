@@ -4,27 +4,33 @@
 
 package akka.stream.javadsl
 
-import akka.util.{ ConstantFun, Timeout }
-import akka.{ Done, NotUsed }
-import akka.event.LoggingAdapter
-import akka.japi.{ function, Pair, Util }
-import akka.stream._
-import org.reactivestreams.Processor
-
-import scala.concurrent.duration.FiniteDuration
-import java.util.{ Comparator, Optional }
 import java.util.concurrent.CompletionStage
-import java.util.function.{ BiFunction, Supplier }
+import java.util.function.BiFunction
+import java.util.function.Supplier
+import java.util.Comparator
+import java.util.Optional
 
-import akka.util.JavaDurationConverters._
 import akka.actor.ActorRef
+import akka.actor.ClassicActorSystemProvider
 import akka.dispatch.ExecutionContexts
+import akka.event.LoggingAdapter
+import akka.japi.Pair
+import akka.japi.Util
+import akka.japi.function
+import akka.stream._
 import akka.stream.impl.fusing.LazyFlow
+import akka.util.JavaDurationConverters._
 import akka.util.unused
+import akka.util.ConstantFun
+import akka.util.Timeout
+import akka.Done
+import akka.NotUsed
 import com.github.ghik.silencer.silent
+import org.reactivestreams.Processor
 
 import scala.annotation.unchecked.uncheckedVariance
 import scala.compat.java8.FutureConverters._
+import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
 
 object Flow {
@@ -63,9 +69,19 @@ object Flow {
 
   /**
    * Defers the creation of a [[Flow]] until materialization. The `factory` function
+   * exposes [[Materializer]] which is going to be used during materialization and
+   * [[Attributes]] of the [[Flow]] returned by this method.
+   */
+  def fromMaterializer[I, O, M](
+      factory: BiFunction[Materializer, Attributes, Flow[I, O, M]]): Flow[I, O, CompletionStage[M]] =
+    scaladsl.Flow.fromMaterializer((mat, attr) => factory(mat, attr).asScala).mapMaterializedValue(_.toJava).asJava
+
+  /**
+   * Defers the creation of a [[Flow]] until materialization. The `factory` function
    * exposes [[ActorMaterializer]] which is going to be used during materialization and
    * [[Attributes]] of the [[Flow]] returned by this method.
    */
+  @deprecated("Use 'fromMaterializer' instead", "2.6.0")
   def setup[I, O, M](
       factory: BiFunction[ActorMaterializer, Attributes, Flow[I, O, M]]): Flow[I, O, CompletionStage[M]] =
     scaladsl.Flow.setup((mat, attr) => factory(mat, attr).asScala).mapMaterializedValue(_.toJava).asJava
@@ -448,7 +464,7 @@ final class Flow[In, Out, Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends Gr
    * | Resulting Flow            |
    * |                           |
    * | +------+        +------+  |
-   * | |      | ~Out~> |      | ~~> O2
+   * | |      | ~Out~> |      | ~~> O1
    * | | flow |        | bidi |  |
    * | |      | <~In~  |      | <~~ I2
    * | +------+        +------+  |
@@ -458,7 +474,7 @@ final class Flow[In, Out, Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends Gr
    * value of the current flow (ignoring the [[BidiFlow]]’s value), use
    * [[Flow#joinMat[I2* joinMat]] if a different strategy is needed.
    */
-  def join[I2, O2, Mat2](bidi: Graph[BidiShape[Out, O2, I2, In], Mat2]): Flow[I2, O2, Mat] =
+  def join[I2, O1, Mat2](bidi: Graph[BidiShape[Out, O1, I2, In], Mat2]): Flow[I2, O1, Mat] =
     new Flow(delegate.join(bidi))
 
   /**
@@ -468,7 +484,7 @@ final class Flow[In, Out, Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends Gr
    * | Resulting Flow            |
    * |                           |
    * | +------+        +------+  |
-   * | |      | ~Out~> |      | ~~> O2
+   * | |      | ~Out~> |      | ~~> O1
    * | | flow |        | bidi |  |
    * | |      | <~In~  |      | <~~ I2
    * | +------+        +------+  |
@@ -482,9 +498,9 @@ final class Flow[In, Out, Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends Gr
    *
    * See also [[viaMat]] when access to materialized values of the parameter is needed.
    */
-  def joinMat[I2, O2, Mat2, M](
-      bidi: Graph[BidiShape[Out, O2, I2, In], Mat2],
-      combine: function.Function2[Mat, Mat2, M]): Flow[I2, O2, M] =
+  def joinMat[I2, O1, Mat2, M](
+      bidi: Graph[BidiShape[Out, O1, I2, In], Mat2],
+      combine: function.Function2[Mat, Mat2, M]): Flow[I2, O1, M] =
     new Flow(delegate.joinMat(bidi)(combinerToScala(combine)))
 
   /**
@@ -492,6 +508,25 @@ final class Flow[In, Out, Mat](delegate: scaladsl.Flow[In, Out, Mat]) extends Gr
    *
    * The returned tuple contains the materialized values of the `Source` and `Sink`,
    * e.g. the `Subscriber` of a `Source.asSubscriber` and `Publisher` of a `Sink.asPublisher`.
+   *
+   * @tparam T materialized type of given Source
+   * @tparam U materialized type of given Sink
+   */
+  def runWith[T, U](
+      source: Graph[SourceShape[In], T],
+      sink: Graph[SinkShape[Out], U],
+      systemProvider: ClassicActorSystemProvider): akka.japi.Pair[T, U] = {
+    val (som, sim) = delegate.runWith(source, sink)(SystemMaterializer(systemProvider.classicSystem).materializer)
+    akka.japi.Pair(som, sim)
+  }
+
+  /**
+   * Connect the `Source` to this `Flow` and then connect it to the `Sink` and run it.
+   *
+   * The returned tuple contains the materialized values of the `Source` and `Sink`,
+   * e.g. the `Subscriber` of a `Source.asSubscriber` and `Publisher` of a `Sink.asPublisher`.
+   *
+   * Prefer the method taking an ActorSystem unless you have special requirements.
    *
    * @tparam T materialized type of given Source
    * @tparam U materialized type of given Sink
@@ -3580,6 +3615,17 @@ abstract class RunnableGraph[+Mat] extends Graph[ClosedShape, Mat] {
 
   /**
    * Run this flow and return the materialized values of the flow.
+   *
+   * Uses the system materializer.
+   */
+  def run(systemProvider: ClassicActorSystemProvider): Mat = {
+    run(SystemMaterializer(systemProvider.classicSystem).materializer)
+  }
+
+  /**
+   * Run this flow using a special materializer and return the materialized values of the flow.
+   *
+   * Prefer the method taking an ActorSystem unless you have special requirements.
    */
   def run(materializer: Materializer): Mat
 

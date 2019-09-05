@@ -1,15 +1,6 @@
 # Classic Actors
 
-@@@ note
-
-Akka Classic is the original Actor APIs, which have been improved by more type safe and guided Actor APIs, 
-known as Akka Typed. Akka Classic is still fully supported and existing applications can continue to use 
-the classic APIs. It is also possible to use Akka Typed together with classic actors within the same 
-ActorSystem, see @ref[coexistence](typed/coexisting.md). For new projects we recommend using the new Actor APIs.
-
-For the new API see @ref[actors](typed/actors.md).
-
-@@@
+@@include[includes.md](includes.md) { #actor-api }
 
 ## Dependency
 
@@ -591,8 +582,7 @@ Java
 
 You can also acquire an `ActorRef` for an `ActorSelection` with
 the `resolveOne` method of the `ActorSelection`. It returns a `Future`
-of the matching `ActorRef` if such an actor exists. @java[(see also
-@ref:[Java 8 Compatibility](java8-compat.md) for Java compatibility).] It is completed with
+of the matching `ActorRef` if such an actor exists. It is completed with
 failure `akka.actor.ActorNotFound` if no such actor exists or the identification
 didn't complete within the supplied `timeout`.
 
@@ -749,8 +739,6 @@ If the actor does not complete the @scala[`Future`]@java[`CompletionStage`], it 
  2. implicit argument of type `akka.util.Timeout`, e.g.
 
     @@snip [ActorDocSpec.scala](/akka-docs/src/test/scala/docs/actor/ActorDocSpec.scala) { #using-implicit-timeout }
-
-See @ref:[Futures](futures.md) for more information on how to await or query a future.
 
 @@@
 

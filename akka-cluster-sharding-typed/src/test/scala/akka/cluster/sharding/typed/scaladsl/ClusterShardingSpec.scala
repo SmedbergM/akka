@@ -217,7 +217,7 @@ class ClusterShardingSpec extends ScalaTestWithActorTestKit(ClusterShardingSpec.
     import akka.pattern.ask
     implicit val timeout: Timeout = Timeout(6.seconds)
     val statsBefore =
-      (shardingRefSystem1WithEnvelope.toUntyped ? akka.cluster.sharding.ShardRegion.GetClusterShardingStats(5.seconds))
+      (shardingRefSystem1WithEnvelope.toClassic ? akka.cluster.sharding.ShardRegion.GetClusterShardingStats(5.seconds))
         .mapTo[akka.cluster.sharding.ShardRegion.ClusterShardingStats]
     val totalCount = statsBefore.futureValue.regions.values.flatMap(_.stats.values).sum
     totalCount
@@ -348,7 +348,7 @@ class ClusterShardingSpec extends ScalaTestWithActorTestKit(ClusterShardingSpec.
       val p = TestProbe[TheReply]()
 
       spawn(Behaviors.setup[TheReply] { ctx =>
-        ctx.ask(aliceRef)(WhoAreYou) {
+        ctx.ask(aliceRef, WhoAreYou) {
           case Success(name) => TheReply(name)
           case Failure(ex)   => TheReply(ex.getMessage)
         }
@@ -395,15 +395,15 @@ class ClusterShardingSpec extends ScalaTestWithActorTestKit(ClusterShardingSpec.
       exc.getMessage should include("[10 ms]") // timeout
     }
 
-    "handle untyped StartEntity message" in {
-      // it is normally using envelopes, but the untyped StartEntity message can be sent internally,
+    "handle classic StartEntity message" in {
+      // it is normally using envelopes, but the classic StartEntity message can be sent internally,
       // e.g. for remember entities
 
       val totalCountBefore = totalEntityCount1()
 
       val p = TestProbe[Any]()
-      shardingRefSystem1WithEnvelope.toUntyped
-        .tell(akka.cluster.sharding.ShardRegion.StartEntity("startEntity-1"), p.ref.toUntyped)
+      shardingRefSystem1WithEnvelope.toClassic
+        .tell(akka.cluster.sharding.ShardRegion.StartEntity("startEntity-1"), p.ref.toClassic)
       p.expectMessageType[akka.cluster.sharding.ShardRegion.StartEntityAck]
 
       eventually {

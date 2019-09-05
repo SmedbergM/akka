@@ -13,7 +13,7 @@ import akka.actor.{ ActorPath, InvalidMessageException }
 import akka.annotation.InternalApi
 import akka.event.Logging
 import akka.util.{ Helpers, OptionVal }
-import akka.{ actor => untyped }
+import akka.{ actor => classic }
 import java.util.concurrent.ThreadLocalRandom.{ current => rnd }
 
 import scala.collection.immutable.TreeMap
@@ -182,6 +182,10 @@ private[akka] final class FunctionRef[-T](override val path: ActorPath, send: (T
   private val loggingAdapter = new StubbedLogger
   private var unhandled: List[T] = Nil
 
+  private[akka] def classicActorContext =
+    throw new UnsupportedOperationException(
+      "No classic ActorContext available with the stubbed actor context, to spawn materializers and run streams you will need a real actor")
+
   override def children: Iterable[ActorRef[Nothing]] = _children.values.map(_.context.self)
   def childrenNames: Iterable[String] = _children.keys
 
@@ -194,7 +198,7 @@ private[akka] final class FunctionRef[-T](override val path: ActorPath, send: (T
   }
   override def spawn[U](behavior: Behavior[U], name: String, props: Props = Props.empty): ActorRef[U] =
     _children.get(name) match {
-      case Some(_) => throw untyped.InvalidActorNameException(s"actor name $name is already taken")
+      case Some(_) => throw classic.InvalidActorNameException(s"actor name $name is already taken")
       case None =>
         val btk = new BehaviorTestKitImpl[U]((path / name).withUid(rnd().nextInt()), behavior)
         _children += name -> btk
@@ -221,8 +225,8 @@ private[akka] final class FunctionRef[-T](override val path: ActorPath, send: (T
   override def setReceiveTimeout(d: FiniteDuration, message: T): Unit = ()
   override def cancelReceiveTimeout(): Unit = ()
 
-  override def scheduleOnce[U](delay: FiniteDuration, target: ActorRef[U], message: U): untyped.Cancellable =
-    new untyped.Cancellable {
+  override def scheduleOnce[U](delay: FiniteDuration, target: ActorRef[U], message: U): classic.Cancellable =
+    new classic.Cancellable {
       override def cancel() = false
       override def isCancelled = true
     }

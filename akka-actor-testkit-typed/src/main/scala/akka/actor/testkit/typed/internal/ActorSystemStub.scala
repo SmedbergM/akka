@@ -19,8 +19,7 @@ import akka.actor.typed.Props
 import akka.actor.typed.Scheduler
 import akka.actor.typed.Settings
 import akka.annotation.InternalApi
-import akka.util.Timeout
-import akka.{ actor => untyped }
+import akka.{ actor => classic }
 import akka.Done
 import com.typesafe.config.ConfigFactory
 
@@ -40,7 +39,7 @@ import com.github.ghik.silencer.silent
     with ActorRefImpl[Nothing]
     with InternalRecipientRef[Nothing] {
 
-  override val path: untyped.ActorPath = untyped.RootActorPath(untyped.Address("akka", name)) / "user"
+  override val path: classic.ActorPath = classic.RootActorPath(classic.Address("akka", name)) / "user"
 
   override val settings: Settings = new Settings(getClass.getClassLoader, ConfigFactory.empty, name)
 
@@ -55,6 +54,11 @@ import com.github.ghik.silencer.silent
 
   // impl InternalRecipientRef, ask not supported
   override def provider: ActorRefProvider = throw new UnsupportedOperationException("no provider")
+
+  // stream materialization etc. using stub not supported
+  override private[akka] def classicSystem =
+    throw new UnsupportedOperationException("no classic actor system available")
+
   // impl InternalRecipientRef
   def isTerminated: Boolean = whenTerminated.isCompleted
 
@@ -68,7 +72,7 @@ import com.github.ghik.silencer.silent
     def shutdown(): Unit = ()
   }
 
-  override def dynamicAccess: untyped.DynamicAccess = new untyped.ReflectiveDynamicAccess(getClass.getClassLoader)
+  override def dynamicAccess: classic.DynamicAccess = new classic.ReflectiveDynamicAccess(getClass.getClassLoader)
 
   override def logConfiguration(): Unit = log.info(settings.toString)
 
@@ -86,19 +90,18 @@ import com.github.ghik.silencer.silent
 
   override def printTree: String = "no tree for ActorSystemStub"
 
-  def systemActorOf[U](behavior: Behavior[U], name: String, props: Props)(
-      implicit timeout: Timeout): Future[ActorRef[U]] = {
-    Future.failed(new UnsupportedOperationException("ActorSystemStub cannot create system actors"))
+  override def systemActorOf[U](behavior: Behavior[U], name: String, props: Props): ActorRef[U] = {
+    throw new UnsupportedOperationException("ActorSystemStub cannot create system actors")
   }
 
-  def registerExtension[T <: Extension](ext: ExtensionId[T]): T =
+  override def registerExtension[T <: Extension](ext: ExtensionId[T]): T =
     throw new UnsupportedOperationException("ActorSystemStub cannot register extensions")
 
-  def extension[T <: Extension](ext: ExtensionId[T]): T =
+  override def extension[T <: Extension](ext: ExtensionId[T]): T =
     throw new UnsupportedOperationException("ActorSystemStub cannot register extensions")
 
-  def hasExtension(ext: ExtensionId[_ <: Extension]): Boolean =
+  override def hasExtension(ext: ExtensionId[_ <: Extension]): Boolean =
     throw new UnsupportedOperationException("ActorSystemStub cannot register extensions")
 
-  def log: Logger = new StubbedLogger
+  override def log: Logger = new StubbedLogger
 }

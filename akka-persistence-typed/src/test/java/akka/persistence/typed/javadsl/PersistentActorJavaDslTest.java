@@ -19,7 +19,6 @@ import akka.persistence.query.journal.leveldb.javadsl.LeveldbReadJournal;
 import akka.persistence.typed.*;
 import akka.persistence.typed.scaladsl.EventSourcedBehaviorSpec;
 import akka.serialization.jackson.CborSerializable;
-import akka.stream.ActorMaterializer;
 import akka.stream.javadsl.Sink;
 import akka.actor.testkit.typed.javadsl.TestKitJunitResource;
 import akka.actor.testkit.typed.javadsl.TestProbe;
@@ -51,11 +50,8 @@ public class PersistentActorJavaDslTest extends JUnitSuite {
   @ClassRule public static final TestKitJunitResource testKit = new TestKitJunitResource(config);
 
   private LeveldbReadJournal queries =
-      PersistenceQuery.get(Adapter.toUntyped(testKit.system()))
+      PersistenceQuery.get(Adapter.toClassic(testKit.system()))
           .getReadJournalFor(LeveldbReadJournal.class, LeveldbReadJournal.Identifier());
-
-  private ActorMaterializer materializer =
-      ActorMaterializer.create(Adapter.toUntyped(testKit.system()));
 
   interface Command extends CborSerializable {}
 
@@ -547,7 +543,7 @@ public class PersistentActorJavaDslTest extends JUnitSuite {
     List<EventEnvelope> events =
         queries
             .currentEventsByTag("tag1", NoOffset.getInstance())
-            .runWith(Sink.seq(), materializer)
+            .runWith(Sink.seq(), testKit.system())
             .toCompletableFuture()
             .get();
     assertEquals(
@@ -578,7 +574,7 @@ public class PersistentActorJavaDslTest extends JUnitSuite {
     List<EventEnvelope> events =
         queries
             .currentEventsByPersistenceId("transform", 0, Long.MAX_VALUE)
-            .runWith(Sink.seq(), materializer)
+            .runWith(Sink.seq(), testKit.system())
             .toCompletableFuture()
             .get();
     assertEquals(
@@ -703,7 +699,7 @@ public class PersistentActorJavaDslTest extends JUnitSuite {
 
     probe.expectMessage("started!"); // workaround for #26256
 
-    new EventFilter(Logging.Error.class, Adapter.toUntyped(testKit.system()))
+    new EventFilter(Logging.Error.class, Adapter.toClassic(testKit.system()))
         .occurrences(1)
         // the error messages slightly changed in later JDKs
         .matches("(class )?java.lang.Integer cannot be cast to (class )?java.lang.String.*")

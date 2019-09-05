@@ -8,24 +8,43 @@ import java.util
 import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.NotUsed
-import akka.actor.{ ActorContext, ActorRef, ActorRefFactory, ActorSystem, Cancellable, ExtendedActorSystem, PoisonPill }
-import akka.annotation.{ DoNotInherit, InternalApi, InternalStableApi }
+import akka.actor.ActorContext
+import akka.actor.ActorRef
+import akka.actor.ActorRefFactory
+import akka.actor.ActorSystem
+import akka.actor.Cancellable
+import akka.actor.ExtendedActorSystem
+import akka.actor.PoisonPill
+import akka.actor.Props
+import akka.annotation.DoNotInherit
+import akka.annotation.InternalApi
+import akka.annotation.InternalStableApi
 import akka.dispatch.Dispatchers
-import akka.event.{ Logging, LoggingAdapter }
+import akka.event.Logging
+import akka.event.LoggingAdapter
 import akka.stream.Attributes.InputBuffer
 import akka.stream._
 import akka.stream.impl.StreamLayout.AtomicModule
-import akka.stream.impl.fusing.ActorGraphInterpreter.{ ActorOutputBoundary, BatchingActorInputBoundary }
+import akka.stream.impl.fusing.ActorGraphInterpreter.ActorOutputBoundary
+import akka.stream.impl.fusing.ActorGraphInterpreter.BatchingActorInputBoundary
 import akka.stream.impl.fusing.GraphInterpreter.Connection
 import akka.stream.impl.fusing._
-import akka.stream.impl.io.{ TLSActor, TlsModule }
-import akka.stream.stage.{ GraphStageLogic, InHandler, OutHandler }
-import org.reactivestreams.{ Processor, Publisher, Subscriber }
+import akka.stream.impl.io.TLSActor
+import akka.stream.impl.io.TlsModule
+import akka.stream.stage.GraphStageLogic
+import akka.stream.stage.InHandler
+import akka.stream.stage.OutHandler
+import akka.util.OptionVal
+import org.reactivestreams.Processor
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
 
 import scala.collection.immutable.Map
+import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.ExecutionContextExecutor
 import akka.util.OptionVal
+import com.github.ghik.silencer.silent
 
 /**
  * INTERNAL API
@@ -40,7 +59,7 @@ import akka.util.OptionVal
         effectiveAttributes: Attributes,
         materializer: PhasedFusingActorMaterializer,
         islandName: String): PhaseIsland[Any] =
-      new GraphStageIsland(settings, effectiveAttributes, materializer, islandName, subflowFuser = OptionVal.None)
+      new GraphStageIsland(effectiveAttributes, materializer, islandName, subflowFuser = OptionVal.None)
         .asInstanceOf[PhaseIsland[Any]]
   }
 
@@ -79,17 +98,20 @@ import akka.util.OptionVal
     },
     GraphStageTag -> DefaultPhase)
 
-  @InternalApi private[akka] def apply()(implicit context: ActorRefFactory): ActorMaterializer = {
+  @silent("deprecated")
+  @InternalApi private[akka] def apply()(implicit context: ActorRefFactory): Materializer = {
     val haveShutDown = new AtomicBoolean(false)
     val system = actorSystemOf(context)
     val materializerSettings = ActorMaterializerSettings(system)
+    val defaultAttributes = materializerSettings.toAttributes
 
     val streamSupervisor =
-      context.actorOf(StreamSupervisor.props(materializerSettings, haveShutDown), StreamSupervisor.nextName())
+      context.actorOf(StreamSupervisor.props(defaultAttributes, haveShutDown), StreamSupervisor.nextName())
 
     PhasedFusingActorMaterializer(
       system,
       materializerSettings,
+      defaultAttributes,
       system.dispatchers,
       streamSupervisor,
       haveShutDown,
@@ -369,6 +391,16 @@ private final case class SavedIslandData(
 @InternalApi private[akka] case class PhasedFusingActorMaterializer(
     system: ActorSystem,
     override val settings: ActorMaterializerSettings,
+    /**
+     * Default attributes for the materializer, based on the [[ActorMaterializerSettings]] and
+     * are always seen as least specific, so any attribute specified in the graph "wins" over these.
+     * In addition to that this also guarantees that the attributes `InputBuffer`, `SupervisionStrategy`,
+     * and `Dispatcher` is _always_ present in the attributes and can be accessed through `Attributes.mandatoryAttribute`
+     *
+     * When these attributes are needed later in the materialization process it is important that
+     * they are gotten through the attributes and not through the [[ActorMaterializerSettings]]
+     */
+    defaultAttributes: Attributes,
     dispatchers: Dispatchers,
     supervisor: ActorRef,
     haveShutDown: AtomicBoolean,
@@ -378,17 +410,8 @@ private final case class SavedIslandData(
 
   private val _logger = Logging.getLogger(system, this)
   override def logger: LoggingAdapter = _logger
-
-  if (settings.fuzzingMode && !system.settings.config.hasPath("akka.stream.secret-test-fuzzing-warning-disable")) {
-    _logger.warning(
-      "Fuzzing mode is enabled on this system. If you see this warning on your production system then " +
-      "set akka.stream.materializer.debug.fuzzing-mode to off.")
-  }
-  if (!settings.autoFusing) {
-    _logger.warning(
-      "Deprecated setting auto-fusing set to false. Since Akka 2.5.0 it does not have any effect " +
-      "and streams are always fused.")
-  }
+  private val fuzzingWarningDisabled =
+    system.settings.config.hasPath("akka.stream.secret-test-fuzzing-warning-disable")
 
   override def shutdown(): Unit =
     if (haveShutDown.compareAndSet(false, true)) supervisor ! PoisonPill
@@ -399,23 +422,9 @@ private final case class SavedIslandData(
 
   private[this] def createFlowName(): String = flowNames.next()
 
-  /**
-   * Default attributes for the materializer, based on the [[ActorMaterializerSettings]] and
-   * are always seen as least specific, so any attribute specified in the graph "wins" over these.
-   * In addition to that this also guarantees that the attributes `InputBuffer`, `SupervisionStrategy`,
-   * and `Dispatcher` is _always_ present in the attributes and can be accessed through `Attributes.mandatoryAttribute`
-   *
-   * When these attributes are needed later in the materialization process it is important that the
-   * they are gotten through the attributes and not through the [[ActorMaterializerSettings]]
-   */
-  val defaultAttributes: Attributes = {
-    Attributes(
-      Attributes.InputBuffer(settings.initialInputBufferSize, settings.maxInputBufferSize) ::
-      ActorAttributes.SupervisionStrategy(settings.supervisionDecider) ::
-      ActorAttributes.Dispatcher(settings.dispatcher) :: Nil)
-  }
-
-  override lazy val executionContext: ExecutionContextExecutor = dispatchers.lookup(settings.dispatcher)
+  // note that this will never be overridden on a per-graph-stage basis regardless of more specific attributes
+  override lazy val executionContext: ExecutionContextExecutor =
+    dispatchers.lookup(defaultAttributes.mandatoryAttribute[ActorAttributes.Dispatcher].dispatcher)
 
   override def scheduleWithFixedDelay(
       initialDelay: FiniteDuration,
@@ -455,18 +464,27 @@ private final case class SavedIslandData(
       defaultPhase: Phase[Any],
       phases: Map[IslandTag, Phase[Any]]): Mat = {
     if (isShutdown) throw new IllegalStateException("Trying to materialize stream after materializer has been shutdown")
+
+    // combine default attributes with top-level runnable/closed graph shape attributes so that per-stream
+    // attributes overriding defaults are used also for the top level interpreter etc.
+    val defaultAndGraphAttributes = defaultAttributes and graph.traversalBuilder.attributes
+    if (defaultAndGraphAttributes.mandatoryAttribute[ActorAttributes.FuzzingMode].enabled && !fuzzingWarningDisabled) {
+      _logger.warning(
+        "Fuzzing mode is enabled on this system. If you see this warning on your production system then " +
+        "set 'akka.stream.materializer.debug.fuzzing-mode' to off.")
+    }
+
     val islandTracking = new IslandTracking(
       phases,
       settings,
-      defaultAttributes,
+      defaultAndGraphAttributes,
       defaultPhase,
       this,
       islandNamePrefix = createFlowName() + "-")
 
     var current: Traversal = graph.traversalBuilder.traversal
-
     val attributesStack = new java.util.ArrayDeque[Attributes](8)
-    attributesStack.addLast(defaultAttributes and graph.traversalBuilder.attributes)
+    attributesStack.addLast(defaultAndGraphAttributes)
 
     val traversalStack = new java.util.ArrayDeque[Traversal](16)
     traversalStack.addLast(current)
@@ -600,6 +618,24 @@ private final case class SavedIslandData(
   override def makeLogger(logSource: Class[_]): LoggingAdapter =
     Logging(system, logSource)
 
+  /**
+   * INTERNAL API
+   */
+  @silent("deprecated")
+  @InternalApi private[akka] override def actorOf(context: MaterializationContext, props: Props): ActorRef = {
+    val effectiveProps = props.dispatcher match {
+      case Dispatchers.DefaultDispatcherId =>
+        props.withDispatcher(context.effectiveAttributes.mandatoryAttribute[ActorAttributes.Dispatcher].dispatcher)
+      case ActorAttributes.IODispatcher.dispatcher =>
+        // this one is actually not a dispatcher but a relative config key pointing containing the actual dispatcher name
+        // FIXME go via attributes here,or something
+        props.withDispatcher(settings.blockingIoDispatcher)
+      case _ => props
+    }
+
+    actorOf(effectiveProps, context.islandName)
+  }
+
 }
 
 /**
@@ -653,7 +689,6 @@ private final case class SavedIslandData(
  * INTERNAL API
  */
 @InternalApi private[akka] final class GraphStageIsland(
-    settings: ActorMaterializerSettings,
     effectiveAttributes: Attributes,
     materializer: PhasedFusingActorMaterializer,
     islandName: String,
@@ -668,7 +703,7 @@ private final case class SavedIslandData(
   private var outConnections: List[Connection] = Nil
   private var fullIslandName: OptionVal[String] = OptionVal.None
 
-  val shell = new GraphInterpreterShell(connections = null, logics = null, settings, effectiveAttributes, materializer)
+  val shell = new GraphInterpreterShell(connections = null, logics = null, effectiveAttributes, materializer)
 
   override def name: String = "Fusing GraphStages phase"
 

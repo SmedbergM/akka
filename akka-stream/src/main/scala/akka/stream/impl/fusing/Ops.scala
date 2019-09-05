@@ -273,8 +273,8 @@ private[stream] object Collect {
         }
       }
 
-      override def onUpstreamFailure(ex: Throwable): Unit = {
-        pf.applyOrElse(ex, NotApplied) match {
+      override def onUpstreamFailure(ex: Throwable): Unit =
+        try pf.applyOrElse(ex, NotApplied) match {
           case NotApplied => failStage(ex)
           case result: T @unchecked => {
             if (isAvailable(out)) {
@@ -284,8 +284,9 @@ private[stream] object Collect {
               recovered = Some(result)
             }
           }
+        } catch {
+          case NonFatal(ex) => failStage(ex)
         }
-      }
 
       setHandlers(in, out, this)
     }
@@ -906,7 +907,7 @@ private[stream] object Collect {
     new GraphStageLogic(shape) with InHandler with OutHandler with StageLogging {
       override protected def logSource: Class[_] = classOf[Buffer[_]]
 
-      private var buffer: BufferImpl[T] = _
+      private val buffer: BufferImpl[T] = BufferImpl(size, inheritedAttributes)
 
       val enqueueAction: T => Unit =
         overflowStrategy match {
@@ -965,7 +966,6 @@ private[stream] object Collect {
         }
 
       override def preStart(): Unit = {
-        buffer = BufferImpl(size, materializer)
         pull(in)
       }
 
@@ -1252,7 +1252,7 @@ private[stream] object Collect {
             }
         })
 
-      override def preStart(): Unit = buffer = BufferImpl(parallelism, materializer)
+      override def preStart(): Unit = buffer = BufferImpl(parallelism, inheritedAttributes)
 
       override def onPull(): Unit = pushNextIfPossible()
 
@@ -1347,7 +1347,7 @@ private[stream] object Collect {
 
       private[this] def todo = inFlight + buffer.used
 
-      override def preStart(): Unit = buffer = BufferImpl(parallelism, materializer)
+      override def preStart(): Unit = buffer = BufferImpl(parallelism, inheritedAttributes)
 
       def futureCompleted(result: Try[Out]): Unit = {
         inFlight -= 1
@@ -1451,16 +1451,7 @@ private[stream] object Collect {
         log = logAdapter match {
           case Some(l) => l
           case _ =>
-            val mat = try ActorMaterializerHelper.downcast(materializer)
-            catch {
-              case ex: Exception =>
-                throw new RuntimeException(
-                  "Log stage can only provide LoggingAdapter when used with ActorMaterializer! " +
-                  "Provide a LoggingAdapter explicitly or use the actor based flow materializer.",
-                  ex)
-            }
-
-            Logging(mat.system, mat)(fromMaterializer)
+            Logging(materializer.system, materializer)(fromMaterializer)
         }
       }
 
@@ -1505,11 +1496,16 @@ private[stream] object Collect {
         super.onUpstreamFinish()
       }
 
-      override def onDownstreamFinish(): Unit = {
+      override def onDownstreamFinish(cause: Throwable): Unit = {
         if (isEnabled(logLevels.onFinish))
-          log.log(logLevels.onFinish, "[{}] Downstream finished.", name)
+          log.log(
+            logLevels.onFinish,
+            "[{}] Downstream finished, cause: {}: {}",
+            name,
+            Logging.simpleName(cause.getClass),
+            cause.getMessage)
 
-        super.onDownstreamFinish()
+        super.onDownstreamFinish(cause: Throwable)
       }
 
       private def isEnabled(l: LogLevel): Boolean = l.asInt != OffInt
@@ -1533,7 +1529,7 @@ private[stream] object Collect {
     override def getClazz(t: Materializer): Class[_] = classOf[Materializer]
 
     override def genString(t: Materializer): String = {
-      try s"$DefaultLoggerName(${ActorMaterializerHelper.downcast(t).supervisor.path})"
+      try s"$DefaultLoggerName(${t.supervisor.path})"
       catch {
         case _: Exception => LogSource.fromString.genString(DefaultLoggerName)
       }
@@ -1721,7 +1717,7 @@ private[stream] object Collect {
 
       var buffer: BufferImpl[(Long, T)] = _ // buffer has pairs timestamp with upstream element
 
-      override def preStart(): Unit = buffer = BufferImpl(size, materializer)
+      override def preStart(): Unit = buffer = BufferImpl(size, inheritedAttributes)
 
       val onPushWhenBufferFull: () => Unit = strategy match {
         case EmitEarly =>
@@ -2000,7 +1996,7 @@ private[stream] object Collect {
       val outHandler = new OutHandler {
         override def onPull(): Unit = sinkIn.pull()
 
-        override def onDownstreamFinish(): Unit = sinkIn.cancel()
+        override def onDownstreamFinish(cause: Throwable): Unit = sinkIn.cancel(cause)
       }
 
       Source.fromGraph(source).runWith(sinkIn.sink)(interpreter.subFusingMaterializer)
@@ -2150,9 +2146,9 @@ private[stream] object Collect {
         super.onUpstreamFailure(ex)
       }
 
-      override def onDownstreamFinish(): Unit = {
+      override def onDownstreamFinish(cause: Throwable): Unit = {
         matPromise.success(None)
-        super.onDownstreamFinish()
+        super.onDownstreamFinish(cause)
       }
 
       override def onPull(): Unit = {
@@ -2222,8 +2218,8 @@ private[stream] object Collect {
           override def onPull(): Unit = {
             subInlet.pull()
           }
-          override def onDownstreamFinish(): Unit = {
-            subInlet.cancel()
+          override def onDownstreamFinish(cause: Throwable): Unit = {
+            subInlet.cancel(cause)
             maybeCompleteStage()
           }
         })
@@ -2244,9 +2240,9 @@ private[stream] object Collect {
               }
             }
           }
-          override def onDownstreamFinish(): Unit = {
+          override def onDownstreamFinish(cause: Throwable): Unit = {
             if (!isClosed(in)) {
-              cancel(in)
+              cancel(in, cause)
             }
             maybeCompleteStage()
           }

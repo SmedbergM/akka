@@ -1,15 +1,7 @@
 # Testing Classic Actors
 
-@@@ note
-
-Akka Classic is the original Actor APIs, which have been improved by more type safe and guided Actor APIs, 
-known as Akka Typed. Akka Classic is still fully supported and existing applications can continue to use 
-the classic APIs. It is also possible to use Akka Typed together with classic actors within the same 
-ActorSystem, see @ref[coexistence](typed/coexisting.md). For new projects we recommend using the new Actor APIs.
-
+@@include[includes.md](includes.md) { #actor-api }
 For the new API see @ref[testing](typed/testing.md).
-
-@@@
 
 ## Dependency
 
@@ -289,7 +281,7 @@ Scala
 Java
 :   @@snip [TestKitDocTest.java](/akka-docs/src/test/java/jdocs/testkit/TestKitDocTest.java) { #test-within }
 
-The block @scala[given to]@java[in] `within` must complete after a @ref:[Duration](common/duration.md) which
+The block @scala[given to]@java[in] `within` must complete after a duration which
 is between `min` and `max`, where the former defaults to zero. The
 deadline calculated by adding the `max` parameter to the block's start
 time is implicitly available within the block to all examination methods, if
@@ -580,6 +572,9 @@ responsible for the Actor creation, but @scala[the]@java[using `TestProbe` or ha
 
 ## CallingThreadDispatcher
 
+The `CallingThreadDispatcher` runs invocations on the current thread only. This
+dispatcher does not create any new threads.
+
 It is possible to use the `CallingThreadDispatcher` in unit testing, as
 described above, but originally it was conceived in order to allow contiguous
 stack traces to be generated in case of an error. As this special dispatcher
@@ -824,6 +819,7 @@ adapted to work with Akka 2.x.
 
 @@@
 
+<a id="sync-testing"></a>
 ## Synchronous Testing: `TestActorRef`
 
 Testing the business logic inside `Actor` classes can be divided into

@@ -108,7 +108,9 @@ public interface IntroTest {
   // #hello-world-bot
 
   // #hello-world-main
+  // #hello-world-main-setup
   public class HelloWorldMain extends AbstractBehavior<HelloWorldMain.Start> {
+    // #hello-world-main-setup
 
     public static class Start {
       public final String name;
@@ -118,6 +120,7 @@ public interface IntroTest {
       }
     }
 
+    // #hello-world-main-setup
     public static Behavior<Start> create() {
       return Behaviors.setup(HelloWorldMain::new);
     }
@@ -129,6 +132,7 @@ public interface IntroTest {
       this.context = context;
       greeter = context.spawn(HelloWorld.create(), "greeter");
     }
+    // #hello-world-main-setup
 
     @Override
     public Receive<Start> createReceive() {
@@ -140,7 +144,9 @@ public interface IntroTest {
       greeter.tell(new HelloWorld.Greet(command.name, replyTo));
       return this;
     }
+    // #hello-world-main-setup
   }
+  // #hello-world-main-setup
   // #hello-world-main
 
   interface CustomDispatchersExample {
@@ -390,26 +396,26 @@ public interface IntroTest {
   }
   // #chatroom-gabbler
 
-  public static void runChatRoom() throws Exception {
+  // #chatroom-main
+  public class Main {
+    public static Behavior<Void> create() {
+      return Behaviors.setup(
+          context -> {
+            ActorRef<ChatRoom.RoomCommand> chatRoom = context.spawn(ChatRoom.create(), "chatRoom");
+            ActorRef<ChatRoom.SessionEvent> gabbler = context.spawn(Gabbler.create(), "gabbler");
+            context.watch(gabbler);
+            chatRoom.tell(new ChatRoom.GetSession("ol’ Gabbler", gabbler));
 
-    // #chatroom-main
-    Behavior<Void> main =
-        Behaviors.setup(
-            context -> {
-              ActorRef<ChatRoom.RoomCommand> chatRoom =
-                  context.spawn(ChatRoom.create(), "chatRoom");
-              ActorRef<ChatRoom.SessionEvent> gabbler = context.spawn(Gabbler.create(), "gabbler");
-              context.watch(gabbler);
-              chatRoom.tell(new ChatRoom.GetSession("ol’ Gabbler", gabbler));
+            return Behaviors.receive(Void.class)
+                .onSignal(Terminated.class, sig -> Behaviors.stopped())
+                .build();
+          });
+    }
 
-              return Behaviors.<Void>receiveSignal(
-                  (c, sig) -> {
-                    if (sig instanceof Terminated) return Behaviors.stopped();
-                    else return Behaviors.unhandled();
-                  });
-            });
-
-    final ActorSystem<Void> system = ActorSystem.create(main, "ChatRoomDemo");
-    // #chatroom-main
+    public static void main(String[] args) {
+      ActorSystem.create(Main.create(), "ChatRoomDemo");
+    }
   }
+  // #chatroom-main
+
 }

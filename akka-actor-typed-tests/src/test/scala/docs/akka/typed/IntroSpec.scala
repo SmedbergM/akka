@@ -12,6 +12,7 @@ import akka.actor.typed.{ ActorRef, ActorSystem, Behavior }
 //#fiddle_code
 
 import akka.NotUsed
+import akka.Done
 import akka.actor.typed.{ DispatcherSelector, Terminated }
 
 import org.scalatest.WordSpecLike
@@ -89,24 +90,27 @@ object IntroSpec {
   //format: ON
 
   object CustomDispatchersExample {
-    import HelloWorldMain.Start
+    object HelloWorldMain {
 
-    //#hello-world-main-with-dispatchers
-    val main: Behavior[Start] =
-      Behaviors.setup { context =>
-        val dispatcherPath = "akka.actor.default-blocking-io-dispatcher"
+      final case class Start(name: String)
 
-        val props = DispatcherSelector.fromConfig(dispatcherPath)
-        val greeter = context.spawn(HelloWorld(), "greeter", props)
+      //#hello-world-main-with-dispatchers
+      def apply(): Behavior[Start] =
+        Behaviors.setup { context =>
+          val dispatcherPath = "akka.actor.default-blocking-io-dispatcher"
 
-        Behaviors.receiveMessage { message =>
-          val replyTo = context.spawn(HelloWorldBot(max = 3), message.name)
+          val props = DispatcherSelector.fromConfig(dispatcherPath)
+          val greeter = context.spawn(HelloWorld(), "greeter", props)
 
-          greeter ! HelloWorld.Greet(message.name, replyTo)
-          Behaviors.same
+          Behaviors.receiveMessage { message =>
+            val replyTo = context.spawn(HelloWorldBot(max = 3), message.name)
+
+            greeter ! HelloWorld.Greet(message.name, replyTo)
+            Behaviors.same
+          }
         }
-      }
-    //#hello-world-main-with-dispatchers
+      //#hello-world-main-with-dispatchers
+    }
   }
 
   //#chatroom-behavior
@@ -193,13 +197,35 @@ object IntroSpec {
   }
   //#chatroom-gabbler
 
+  //#chatroom-main
+  object Main {
+    def apply(): Behavior[NotUsed] =
+      Behaviors.setup { context =>
+        val chatRoom = context.spawn(ChatRoom(), "chatroom")
+        val gabblerRef = context.spawn(Gabbler(), "gabbler")
+        context.watch(gabblerRef)
+        chatRoom ! ChatRoom.GetSession("ol’ Gabbler", gabblerRef)
+
+        Behaviors.receiveSignal {
+          case (_, Terminated(_)) =>
+            Behaviors.stopped
+        }
+      }
+
+    def main(args: Array[String]): Unit = {
+      ActorSystem(Main(), "ChatRoomDemo")
+    }
+
+  }
+  //#chatroom-main
+
 }
 
 class IntroSpec extends ScalaTestWithActorTestKit with WordSpecLike {
 
   import IntroSpec._
 
-  "Hello world" must {
+  "Intro sample" must {
     "say hello" in {
       //#fiddle_code
       //#hello-world
@@ -218,23 +244,8 @@ class IntroSpec extends ScalaTestWithActorTestKit with WordSpecLike {
     }
 
     "chat" in {
-      //#chatroom-main
-      val main: Behavior[NotUsed] =
-        Behaviors.setup { context =>
-          val chatRoom = context.spawn(ChatRoom(), "chatroom")
-          val gabblerRef = context.spawn(Gabbler(), "gabbler")
-          context.watch(gabblerRef)
-          chatRoom ! ChatRoom.GetSession("ol’ Gabbler", gabblerRef)
-
-          Behaviors.receiveSignal {
-            case (_, Terminated(_)) =>
-              Behaviors.stopped
-          }
-        }
-
-      val system = ActorSystem(main, "ChatRoomDemo")
-      //#chatroom-main
-      system.whenTerminated // remove compiler warnings
+      val system = ActorSystem(Main(), "ChatRoomDemo")
+      system.whenTerminated.futureValue should ===(Done)
     }
   }
 

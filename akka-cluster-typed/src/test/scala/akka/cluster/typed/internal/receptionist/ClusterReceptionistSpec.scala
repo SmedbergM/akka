@@ -240,7 +240,7 @@ class ClusterReceptionistSpec extends WordSpec with Matchers {
 
         regProbe2.expectMessageType[Listing].serviceInstances(PingKey).size should ===(2)
 
-        akka.cluster.Cluster(system1.toUntyped).shutdown()
+        akka.cluster.Cluster(system1.toClassic).shutdown()
 
         regProbe2.expectNoMessage(3.seconds)
 
@@ -592,7 +592,7 @@ class ClusterReceptionistSpec extends WordSpec with Matchers {
     "not conflict with the ClusterClient receptionist default name" in {
       val testKit = ActorTestKit(s"ClusterReceptionistSpec-test-9", ClusterReceptionistSpec.config)
       try {
-        testKit.system.systemActorOf(Behaviors.ignore, "receptionist")(3.seconds)
+        testKit.system.systemActorOf(Behaviors.ignore, "receptionist")
       } finally {
         testKit.shutdownTestKit()
       }

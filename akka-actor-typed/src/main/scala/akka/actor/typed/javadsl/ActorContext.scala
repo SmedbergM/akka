@@ -12,6 +12,8 @@ import akka.actor.typed._
 import java.util.Optional
 import java.util.concurrent.CompletionStage
 
+import akka.actor.ClassicActorContextProvider
+
 import scala.concurrent.ExecutionContextExecutor
 
 /**
@@ -35,7 +37,7 @@ import scala.concurrent.ExecutionContextExecutor
  * Not for user extension.
  */
 @DoNotInherit
-trait ActorContext[T] extends TypedActorContext[T] {
+trait ActorContext[T] extends TypedActorContext[T] with ClassicActorContextProvider {
   // this must be a pure interface, i.e. only abstract methods
 
   /**
@@ -269,7 +271,7 @@ trait ActorContext[T] extends TypedActorContext[T] {
    *                      the other actor can send a message back through.
    * @param applyToResponse Transforms the response from the `target` into a message this actor understands.
    *                        Will be invoked with either the response message or an AskTimeoutException failed or
-   *                        potentially another exception if the remote actor is untyped and sent a
+   *                        potentially another exception if the remote actor is classic and sent a
    *                        [[akka.actor.Status.Failure]] as response. The returned message of type `T` is then
    *                        fed into this actor as a message. Should be a pure function but is executed inside
    *                        the actor when the response arrives so can safely touch the actor internals. If this

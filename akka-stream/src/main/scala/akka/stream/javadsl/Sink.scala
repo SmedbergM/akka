@@ -5,24 +5,29 @@
 package akka.stream.javadsl
 
 import java.util.Optional
-
-import akka.{ japi, Done, NotUsed }
-import akka.actor.ActorRef
-import akka.dispatch.ExecutionContexts
-import akka.japi.function
-import akka.stream.impl.LinearTraversalBuilder
-import akka.stream.{ javadsl, scaladsl, _ }
-import org.reactivestreams.{ Publisher, Subscriber }
-
-import scala.compat.java8.OptionConverters._
-import scala.concurrent.ExecutionContext
-import scala.util.Try
 import java.util.concurrent.CompletionStage
 import java.util.function.BiFunction
 
-import scala.collection.immutable
+import akka.Done
+import akka.NotUsed
+import akka.actor.ActorRef
+import akka.actor.ClassicActorSystemProvider
+import akka.dispatch.ExecutionContexts
+import akka.japi
+import akka.japi.function
+import akka.stream._
+import akka.stream.impl.LinearTraversalBuilder
+import akka.stream.javadsl
+import akka.stream.scaladsl
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
+
 import scala.annotation.unchecked.uncheckedVariance
+import scala.collection.immutable
 import scala.compat.java8.FutureConverters._
+import scala.compat.java8.OptionConverters._
+import scala.concurrent.ExecutionContext
+import scala.util.Try
 
 /** Java API */
 object Sink {
@@ -276,9 +281,18 @@ object Sink {
 
   /**
    * Defers the creation of a [[Sink]] until materialization. The `factory` function
+   * exposes [[Materializer]] which is going to be used during materialization and
+   * [[Attributes]] of the [[Sink]] returned by this method.
+   */
+  def fromMaterializer[T, M](factory: BiFunction[Materializer, Attributes, Sink[T, M]]): Sink[T, CompletionStage[M]] =
+    scaladsl.Sink.fromMaterializer((mat, attr) => factory(mat, attr).asScala).mapMaterializedValue(_.toJava).asJava
+
+  /**
+   * Defers the creation of a [[Sink]] until materialization. The `factory` function
    * exposes [[ActorMaterializer]] which is going to be used during materialization and
    * [[Attributes]] of the [[Sink]] returned by this method.
    */
+  @deprecated("Use 'fromMaterializer' instead", "2.6.0")
   def setup[T, M](factory: BiFunction[ActorMaterializer, Attributes, Sink[T, M]]): Sink[T, CompletionStage[M]] =
     scaladsl.Sink.setup((mat, attr) => factory(mat, attr).asScala).mapMaterializedValue(_.toJava).asJava
 
@@ -381,6 +395,14 @@ final class Sink[In, Mat](delegate: scaladsl.Sink[In, Mat]) extends Graph[SinkSh
 
   /**
    * Connect this `Sink` to a `Source` and run it.
+   *
+   * Note that the `ActorSystem` can be used as the `systemProvider` parameter.
+   */
+  def runWith[M](source: Graph[SourceShape[In], M], systemProvider: ClassicActorSystemProvider): M =
+    asScala.runWith(source)(SystemMaterializer(systemProvider.classicSystem).materializer)
+
+  /**
+   * Connect this `Sink` to a `Source` and run it.
    */
   def runWith[M](source: Graph[SourceShape[In], M], materializer: Materializer): M =
     asScala.runWith(source)(materializer)
@@ -407,6 +429,22 @@ final class Sink[In, Mat](delegate: scaladsl.Sink[In, Mat]) extends Graph[SinkSh
    * that can be consume elements 'into' the pre-materialized one.
    *
    * Useful for when you need a materialized value of a Sink when handing it out to someone to materialize it for you.
+   *
+   * Note that the `ActorSystem` can be used as the `systemProvider` parameter.
+   */
+  def preMaterialize(systemProvider: ClassicActorSystemProvider)
+      : japi.Pair[Mat @uncheckedVariance, Sink[In @uncheckedVariance, NotUsed]] = {
+    val (mat, sink) = delegate.preMaterialize()(SystemMaterializer(systemProvider.classicSystem).materializer)
+    akka.japi.Pair(mat, sink.asJava)
+  }
+
+  /**
+   * Materializes this Sink, immediately returning (1) its materialized value, and (2) a new Sink
+   * that can be consume elements 'into' the pre-materialized one.
+   *
+   * Useful for when you need a materialized value of a Sink when handing it out to someone to materialize it for you.
+   *
+   * Prefer the method taking an ActorSystem unless you have special requirements.
    */
   def preMaterialize(
       materializer: Materializer): japi.Pair[Mat @uncheckedVariance, Sink[In @uncheckedVariance, NotUsed]] = {

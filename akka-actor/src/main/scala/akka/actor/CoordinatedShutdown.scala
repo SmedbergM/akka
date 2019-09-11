@@ -377,6 +377,8 @@ final class CoordinatedShutdown private[akka] (
         // run that task as many times as it was registered (minus the number of times those were cancelled), so they must
         // be distinct in a Set[TaskDefinition].
 
+        private val p = Promise[Done]()
+
         override private[tasks] def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done] = {
           if (log.isDebugEnabled) {
             log.debug("Performing task [{}] in CoordinatedShutdown phase [{}]", name, phaseName)
@@ -401,14 +403,13 @@ final class CoordinatedShutdown private[akka] (
               case NonFatal(exc) =>
                 Future.failed(exc)
             }
-            p.completeWith(f.map(_ => ()))
+            p.completeWith(f)
             f
           }
         }
-        private val p = Promise[Unit]()
 
         override def cancel(): Boolean = {
-          val cancelled = p.trySuccess(())
+          val cancelled = p.trySuccess(Done)
           // now release all cancelled tasks in phase
           registeredPhases
             .merge(phaseName, StrictPhaseDefinition.empty, (previous, incoming) => previous.merge(incoming))

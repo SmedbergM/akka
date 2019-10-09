@@ -6,20 +6,19 @@ package akka.actor
 
 import java.util
 import scala.concurrent.duration._
-import scala.concurrent.Await
-import scala.concurrent.Future
+import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
 import akka.Done
-import akka.testkit.{ AkkaSpec, EventFilter, TestKit, TestProbe }
-import com.typesafe.config.{ Config, ConfigFactory }
+import akka.testkit.{AkkaSpec, EventFilter, TestKit, TestProbe}
+import com.typesafe.config.{Config, ConfigFactory}
 import akka.actor.CoordinatedShutdown.Phase
 import akka.actor.CoordinatedShutdown.UnknownReason
 import akka.util.ccompat.JavaConverters._
-import scala.concurrent.Promise
-import java.util.concurrent.TimeoutException
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{Executors, TimeoutException}
+import scala.collection.parallel.ParSeq
 
 import akka.ConfigurationException
+import akka.dispatch.ExecutionContexts
 
 class CoordinatedShutdownSpec
     extends AkkaSpec(ConfigFactory.parseString("""
@@ -154,91 +153,168 @@ class CoordinatedShutdownSpec
       }
     }
 
-    "cancel tasks" in {
+    "cancel shutdown tasks" in {
+      import system.dispatcher
+      val phases = Map("a" -> emptyPhase)
+      val co = new CoordinatedShutdown(extSys, phases)
+      val probe = TestProbe()
+      def createTask(message: String): () => Future[Done] = () => Future {
+        probe.ref ! message
+        Done
+      }
+
+      val task1 = co.addCancellableTask("a", "copy1")(createTask("copy1"))
+      val task2 = co.addCancellableTask("a", "copy2")(createTask("copy2"))
+      val task3 = co.addCancellableTask("a", "copy3")(createTask("copy3"))
+
+      assert(!task1.isCancelled)
+      assert(!task2.isCancelled)
+      assert(!task3.isCancelled)
+
+      task2.cancel()
+      assert(task2.isCancelled)
+
+      val messagesFut = Future {
+        probe.receiveN(2, 3.seconds).map(_.toString)
+      }
+      whenReady(co.run(UnknownReason).flatMap(_ => messagesFut), timeout(250.milliseconds)) { messages =>
+        messages.distinct.size shouldEqual 2
+        messages.foreach {
+          case "copy1" | "copy3" => // OK
+          case other => fail(s"Unexpected probe message ${other}!")
+        }
+      }
+    }
+
+    "re-register the same task if requested" in {
+      import system.dispatcher
+      val phases = Map("a" -> emptyPhase)
+      val co = new CoordinatedShutdown(extSys, phases)
+      val testProbe = TestProbe()
+
+      val taskName = "labor"
+      val task: () => Future[Done] = () => Future {
+        testProbe.ref ! taskName
+        Done
+      }
+
+      val task1 = co.addCancellableTask("a", taskName)(task)
+      val task2 = co.addCancellableTask("a", taskName)(task)
+      val task3 = co.addCancellableTask("a", taskName)(task)
+
+      List(task1, task2, task3).foreach { t =>
+        assert(!t.isCancelled)
+      }
+
+      task1.cancel()
+      assert(task1.isCancelled)
+
+      val messagesFut = Future {
+        testProbe.receiveN(2, 3.seconds).map(_.toString)
+      }
+      whenReady(co.run(UnknownReason).flatMap(_ => messagesFut), timeout(250.milliseconds)) { messages =>
+        messages.distinct.size shouldEqual 1
+        messages.head shouldEqual taskName
+      }
+    }
+
+    "honor registration and cancellation in later phases" in {
       import system.dispatcher
       val phases = Map("a" -> emptyPhase, "b" -> phase("a"))
       val co = new CoordinatedShutdown(extSys, phases)
 
-      val task0Counter = new AtomicInteger()
+      val testProbe = TestProbe()
 
-      val task0: () => Future[Done] = () =>
-        Future {
-          task0Counter.incrementAndGet()
+      object TaskAB {
+        val taskA: Cancellable = co.addCancellableTask("a", "taskA"){ () => Future {
+          taskB.cancel()
+          testProbe.ref ! "A cancels B"
           Done
-        }
+        }}
 
-      co.addCancellableTask("a", "task0-copy0")(task0)
-      co.addCancellableTask("a", "task0-copy1")(task0)
-      val cancellable0 = co.addCancellableTask("a", "task0-copy2")(task0)
-
-      object Task1 { // We can also add a method as a task
-        val counter = new AtomicInteger()
-
-        private def taskMethod(): Future[Done] = Future {
-          counter.incrementAndGet()
+        val taskB: Cancellable = co.addCancellableTask("b", "taskB"){ () => Future {
+          taskA.cancel()
+          testProbe.ref ! "B cancels A"
           Done
-        }
+        }}
+      }
+      co.addCancellableTask("a", "taskA"){ () => Future {
+        co.addCancellableTask("b", "dependentTaskB"){ () => Future {
+          testProbe.ref ! "A adds B"
+          Done
+        }}
+        Done
+      }}
+      co.addCancellableTask("a", "taskA"){ () => Future {
+        co.addCancellableTask("a", "dependentTaskA"){ () => Future {
+          testProbe.ref ! "A adds A"
+          Done
+        }}
+        Done
+      }}
+      co.addCancellableTask("b", "taskB"){ () => Future {
+        co.addCancellableTask("a", "dependentTaskA"){ () => Future {
+          testProbe.ref ! "B adds A"
+          Done
+        }}
+        Done
+      }}
 
-        def register(phase: String, name: String): Cancellable = co.addCancellableTask(phase, name)(taskMethod _)
+      List(TaskAB.taskA, TaskAB.taskB).foreach { t =>
+        t.isCancelled shouldBe false
       }
 
-      Task1.register("b", "task1-copy0")
-      Task1.register("b", "task1-copy1")
-      val cancellable1 = Task1.register("b", "task1-copy2")
+      val messagesFut = Future {
+        testProbe.receiveN(2, 3.seconds).map(_.toString)
+      }
+      whenReady(co.run(UnknownReason).flatMap(_ => messagesFut), timeout(250.milliseconds)) { messages =>
+        messages.toSet shouldEqual Set("A adds B", "A cancels B")
+      }
+    }
 
-      // Adding the same task twice under the same phase/name will still run it twice
-      val task2counter = new AtomicInteger()
-      co.addCancellableTask("a", "task2")(() =>
-        Future {
-          task2counter.incrementAndGet()
-          Done
-        })
-      co.addCancellableTask("a", "task2")(() =>
-        Future {
-          task2counter.incrementAndGet()
-          Done
-        })
-      val cancellable2 = co.addCancellableTask("a", "task2")(() =>
-        Future {
-          task2counter.incrementAndGet()
-          Done
-        })
+    "cancel tasks across threads" in {
+      val phases = Map("a" -> emptyPhase, "b" -> phase("a"))
+      val co = new CoordinatedShutdown(extSys, phases)
+      val testProbe = TestProbe()
 
-      object TaskAB { // tests cancellation by tasks in a previous/later phase
-        val promiseA = Promise[Unit]
-        val promiseB = Promise[Unit]
-        val taskA: Cancellable = co.addCancellableTask("a", "task-a") { () =>
-          Future {
-            taskB.cancel()
-            promiseA.trySuccess(log.info("Completing Promise A"))
-            Done
-          }
-        }
-        val taskB: Cancellable = co.addCancellableTask("b", "task-b") { () =>
-          Future {
-            taskA.cancel()
-            promiseB.trySuccess(log.info("Completing Promise B"))
-            Done
-          }
+      val executor = Executors.newFixedThreadPool(10)
+      implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutor(executor)
+
+      case class BMessage(content: String)
+
+      val messageA = "concurrentA"
+      val task: () => Future[Done] = () => Future {
+        testProbe.ref ! messageA
+        co.addCancellableTask("b", "concurrentB"){() => Future {
+          testProbe.ref ! BMessage("concurrentB")
+          Done
+        }(ExecutionContexts.sameThreadExecutionContext)}
+        Done
+      }(ExecutionContexts.sameThreadExecutionContext)
+
+      val cancellables = ParSeq.range(0, 20).map { _ =>
+        co.addCancellableTask("a", "concurrentTaskA")(task)
+      }
+
+      val shouldBeCancelled = cancellables.zipWithIndex.collect {
+        case (c, i) if i%2 == 0 => c
+      }
+
+      cancellables.foreach { _ =>
+        shouldBeCancelled.foreach { c =>
+          c.cancel() shouldBe true // .cancel is idempotent -- can be safely called multiple times from multiple threads
         }
       }
 
-      TaskAB.promiseA.isCompleted shouldBe false
-      TaskAB.promiseB.isCompleted shouldBe false
-      TaskAB.taskA.isCancelled shouldBe false
-      TaskAB.taskB.isCancelled shouldBe false
-
-      cancellable0.cancel()
-      cancellable1.cancel()
-      cancellable2.cancel()
-
-      whenReady(co.run(UnknownReason)) { _ =>
-        task0Counter.get shouldEqual 2
-        Task1.counter.get shouldEqual 2
-        task2counter.get shouldEqual 2
-        TaskAB.promiseA.isCompleted shouldBe true
-        TaskAB.promiseB.isCompleted shouldBe false
+      val messagesFut = Future {
+        testProbe.receiveN(20, 3.seconds).map(_.toString)
       }
+      whenReady(co.run(UnknownReason).flatMap(_ => messagesFut), timeout(250.milliseconds)) { messages =>
+        messages.length shouldEqual 20
+        messages.toSet shouldEqual Set(messageA, "BMessage(concurrentB)")
+      }
+
+      executor.shutdown()
     }
 
     "run from a given phase" in {

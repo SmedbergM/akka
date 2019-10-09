@@ -371,55 +371,83 @@ final class CoordinatedShutdown private[akka] (
       private[tasks] def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done]
     }
     private object TaskDefinition {
-      def create(phaseName: String, task: () => Future[Done], name: String): TaskDefinition = new TaskDefinition {
+      def apply(phaseName: String, task: () => Future[Done], name: String): TaskDefinition = new TaskDefinition {
         // This is a vanilla class instead of a case class to avoid default implementations of .hashCode() and .equals
         // Different code paths could register the same task under the same name multiple times; in this case we want to
         // run that task as many times as it was registered (minus the number of times those were cancelled), so they must
         // be distinct in a Set[TaskDefinition].
 
-        private val p = Promise[Done]()
+        private sealed trait TaskState
+        private case object Pending extends TaskState
+        private case object Cancelled extends TaskState
+        private case class Running(job: Promise[Done]) extends TaskState
+        private val taskState = new AtomicReference[TaskState](Pending)
 
+        @tailrec
         override private[tasks] def run(recoverEnabled: Boolean)(implicit ec: ExecutionContext): Future[Done] = {
-          if (log.isDebugEnabled) {
-            log.debug("Performing task [{}] in CoordinatedShutdown phase [{}]", name, phaseName)
+          val job = Promise[Done]()
+          val nextTaskState = taskState.updateAndGet {
+            case Pending           => Running(job)
+            case Cancelled         => Cancelled
+            case Running(otherJob) => Running(otherJob)
           }
-          if (p.isCompleted) {
-            Future.successful(Done)
-          } else {
-            val f = try {
-              task.apply().recover {
-                case NonFatal(exc) if recoverEnabled =>
-                  log.warning("Task [{}] failed in phase [{}]: {}", name, phaseName, exc.getMessage)
-                  Done
+          nextTaskState match {
+            case Running(runningJob) if runningJob == job =>
+              // only start the job if atomic update succeeds and we were the winner of any race
+              if (log.isDebugEnabled) {
+                log.debug("Performing task [{}] in CoordinatedShutdown phase [{}]", name, phaseName)
               }
-            } catch { // in case task.apply() throws
-              case NonFatal(exc) if recoverEnabled =>
-                log.warning(
-                  "Task [{}] in phase [{}] threw an exception before its future could be constructed: {}",
-                  name,
-                  phaseName,
-                  exc.getMessage)
-                Future.successful(Done)
-              case NonFatal(exc) =>
-                Future.failed(exc)
-            }
-            p.completeWith(f)
-            f
+              job.completeWith(try {
+                task.apply().recover {
+                  case NonFatal(exc) if recoverEnabled =>
+                    log.warning("Task [{}] failed in phase [{}]: {}", name, phaseName, exc.getMessage)
+                    Done
+                }
+              } catch { // in case task.apply() throws
+                case NonFatal(exc) if recoverEnabled =>
+                  log.warning(
+                    "Task [{}] in phase [{}] threw an exception before its future could be constructed: {}",
+                    name,
+                    phaseName,
+                    exc.getMessage)
+                  Future.successful(Done)
+                case NonFatal(exc) =>
+                  Future.failed(exc)
+              })
+              job.future
+            case Running(otherJob) =>
+              log.warning("Task [{}] in phase [{}] was invoked multiple times and deduplicated.", name, phaseName)
+              otherJob.future
+            case Cancelled =>
+              Future.successful(Done)
+            case Pending =>
+              log.error("Atomic update produced an impossible value; this should never happen!")
+              run(recoverEnabled)
           }
         }
 
         override def cancel(): Boolean = {
-          val cancelled = p.trySuccess(Done)
-          // now release all cancelled tasks in phase
-          registeredPhases
-            .merge(phaseName, StrictPhaseDefinition.empty, (previous, incoming) => previous.merge(incoming))
-          if (cancelled && log.isDebugEnabled) {
-            log.debug("Successfully cancelled CoordinatedShutdown task [{}] from phase [{}].", name, phaseName)
+          val nextTaskState = taskState.updateAndGet {
+            case Pending => Cancelled
+            case other   => other
           }
-          cancelled
+          nextTaskState match {
+            case Cancelled =>
+              registeredPhases
+                .merge(phaseName, StrictPhaseDefinition.empty, (previous, incoming) => previous.merge(incoming))
+              if (log.isDebugEnabled) {
+                log.debug("Successfully cancelled CoordinatedShutdown task [{}] from phase [{}].", name, phaseName)
+              }
+              true
+            case _ =>
+              false
+          }
         }
 
-        override def isCancelled: Boolean = p.isCompleted
+        // must be side-effect free
+        override def isCancelled: Boolean = {
+          taskState.get() == Cancelled
+        }
       }
     }
 
@@ -455,13 +483,14 @@ final class CoordinatedShutdown private[akka] (
       }
     }
 
-    def register(phaseName: String)(task: () => Future[Done], name: String): Cancellable = {
-      val cancellable: TaskDefinition = TaskDefinition.create(phaseName, task, name)
+    def register(phaseName: String, task: () => Future[Done], name: String): Cancellable = {
+      val cancellable: TaskDefinition = TaskDefinition(phaseName, task, name)
 
       registeredPhases.merge(
         phaseName,
         StrictPhaseDefinition.single(cancellable),
         (previous, incoming) => previous.merge(incoming))
+
       cancellable
     }
   }
@@ -504,7 +533,7 @@ final class CoordinatedShutdown private[akka] (
       taskName.nonEmpty,
       "Set a task name when adding tasks to the Coordinated Shutdown. " +
       "Try to use unique, self-explanatory names.")
-    tasks.register(phase)(task, taskName)
+    tasks.register(phase, task, taskName)
   }
 
   /**
@@ -546,7 +575,7 @@ final class CoordinatedShutdown private[akka] (
       taskName.nonEmpty,
       "Set a task name when adding tasks to the Coordinated Shutdown. " +
       "Try to use unique, self-explanatory names.")
-    tasks.register(phase)(task, taskName)
+    tasks.register(phase, task, taskName)
   }
 
   /**

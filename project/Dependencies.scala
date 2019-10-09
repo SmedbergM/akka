@@ -31,12 +31,12 @@ object Dependencies {
 
   val reactiveStreamsVersion = "1.0.3"
 
-  val sslConfigVersion = "0.3.8"
+  val sslConfigVersion = "0.4.0"
 
   val Versions = Seq(
     crossScalaVersions := Seq(scala212Version, scala213Version),
     scalaVersion := System.getProperty("akka.build.scalaVersion", crossScalaVersions.value.head),
-    scalaCheckVersion := sys.props.get("akka.build.scalaCheckVersion").getOrElse("1.14.0"),
+    scalaCheckVersion := sys.props.get("akka.build.scalaCheckVersion").getOrElse("1.14.2"),
     scalaTestVersion := {
       CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((2, n)) if n >= 13 => "3.0.8"
@@ -112,7 +112,7 @@ object Dependencies {
       val commonsCodec = "commons-codec" % "commons-codec" % "1.13" % "test" // ApacheV2
       val junit = "junit" % "junit" % junitVersion % "test" // Common Public License 1.0
       val logback = Compile.logback % "test" // EPL 1.0
-      val mockito = "org.mockito" % "mockito-core" % "3.0.0" % "test" // MIT
+      val mockito = "org.mockito" % "mockito-core" % "3.1.0" % "test" // MIT
       // changing the scalatest dependency must be reflected in akka-docs/rst/dev/multi-jvm-testing.rst
       val scalatest = Def.setting { "org.scalatest" %% "scalatest" % scalaTestVersion.value % "test" } // ApacheV2
       val scalacheck = Def.setting { "org.scalacheck" %% "scalacheck" % scalaCheckVersion.value % "test" } // New BSD

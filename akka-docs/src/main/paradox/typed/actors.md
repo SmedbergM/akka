@@ -7,6 +7,12 @@ project.description: The Actor model, managing internal state and changing behav
 For the Akka Classic documentation of this feature see @ref:[Classic Actors](../actors.md).
 @@@
 
+@@@ note
+Both the Java and Scala DSLs of Akka modules bundled in the same JAR. For a smooth development experience,
+when using an IDE such as Eclipse or IntelliJ, you can disable the auto-importer from suggesting `javadsl`
+imports when working in Scala, or viceversa. See @ref:[IDE Tips](../additional/ide.md). 
+@@@
+
 @@project-info{ projectId="akka-actor-typed" }
 
 ## Dependency
@@ -52,6 +58,8 @@ Java
 
 With these in place we can define our first Actor, and it will say
 hello!
+
+![hello-world1.png](./images/hello-world1.png)
 
 Scala
 :  @@snip [IntroSpec.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/IntroSpec.scala) { #hello-world-actor }
@@ -99,6 +107,8 @@ nobody to talk to. We need another Actor that interacts with the `Greeter`.
 Let's make a `HelloWorldBot` that receives the reply from the `Greeter` and sends a number
 of additional greeting messages and collect the replies until a given max number
 of messages have been reached.
+
+![hello-world2.png](./images/hello-world2.png)
 
 Scala
 :  @@snip [IntroSpec.scala](/akka-actor-typed-tests/src/test/scala/docs/akka/typed/IntroSpec.scala) { #hello-world-bot }
@@ -166,6 +176,8 @@ The next example is more realistic and demonstrates some important patterns:
 * Handle sessions by using child actors
 * Handling state by changing behavior
 * Using multiple actors to represent different parts of a protocol in a type safe way
+
+![chat-room.png](./images/chat-room.png)
 
 ### Functional Style
 

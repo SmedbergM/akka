@@ -8,14 +8,13 @@ project.description: Using Akka to build reliable multi-core applications distri
 @@@ index
 
 * [actors](actors.md)
-
 * [actor-lifecycle](actor-lifecycle.md)
+* [coordinated-shutdown](../coordinated-shutdown.md)
 * [interaction patterns](interaction-patterns.md)
 * [fault-tolerance](fault-tolerance.md)
 * [actor-discovery](actor-discovery.md)
 * [routers](routers.md)
 * [stash](stash.md)
-* [stream](stream.md)
 * [fsm](fsm.md)
 * [dispatchers](dispatchers.md)
 * [mailboxes](mailboxes.md)

@@ -6,15 +6,15 @@ package akka.actor
 
 import java.util
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext, Future, Promise}
+import scala.concurrent.{ Await, ExecutionContext, Future, Promise }
 
 import akka.Done
-import akka.testkit.{AkkaSpec, EventFilter, TestKit, TestProbe}
-import com.typesafe.config.{Config, ConfigFactory}
+import akka.testkit.{ AkkaSpec, EventFilter, TestKit, TestProbe }
+import com.typesafe.config.{ Config, ConfigFactory }
 import akka.actor.CoordinatedShutdown.Phase
 import akka.actor.CoordinatedShutdown.UnknownReason
 import akka.util.ccompat.JavaConverters._
-import java.util.concurrent.{Executors, TimeoutException}
+import java.util.concurrent.{ Executors, TimeoutException }
 import scala.collection.parallel.ParSeq
 
 import akka.ConfigurationException
@@ -158,10 +158,12 @@ class CoordinatedShutdownSpec
       val phases = Map("a" -> emptyPhase)
       val co = new CoordinatedShutdown(extSys, phases)
       val probe = TestProbe()
-      def createTask(message: String): () => Future[Done] = () => Future {
-        probe.ref ! message
-        Done
-      }
+      def createTask(message: String): () => Future[Done] =
+        () =>
+          Future {
+            probe.ref ! message
+            Done
+          }
 
       val task1 = co.addCancellableTask("a", "copy1")(createTask("copy1"))
       val task2 = co.addCancellableTask("a", "copy2")(createTask("copy2"))
@@ -181,7 +183,7 @@ class CoordinatedShutdownSpec
         messages.distinct.size shouldEqual 2
         messages.foreach {
           case "copy1" | "copy3" => // OK
-          case other => fail(s"Unexpected probe message ${other}!")
+          case other             => fail(s"Unexpected probe message ${other}!")
         }
       }
     }
@@ -193,10 +195,11 @@ class CoordinatedShutdownSpec
       val testProbe = TestProbe()
 
       val taskName = "labor"
-      val task: () => Future[Done] = () => Future {
-        testProbe.ref ! taskName
-        Done
-      }
+      val task: () => Future[Done] = () =>
+        Future {
+          testProbe.ref ! taskName
+          Done
+        }
 
       val task1 = co.addCancellableTask("a", taskName)(task)
       val task2 = co.addCancellableTask("a", taskName)(task)
@@ -226,39 +229,55 @@ class CoordinatedShutdownSpec
       val testProbe = TestProbe()
 
       object TaskAB {
-        val taskA: Cancellable = co.addCancellableTask("a", "taskA"){ () => Future {
-          taskB.cancel()
-          testProbe.ref ! "A cancels B"
-          Done
-        }}
+        val taskA: Cancellable = co.addCancellableTask("a", "taskA") { () =>
+          Future {
+            taskB.cancel()
+            testProbe.ref ! "A cancels B"
+            Done
+          }
+        }
 
-        val taskB: Cancellable = co.addCancellableTask("b", "taskB"){ () => Future {
-          taskA.cancel()
-          testProbe.ref ! "B cancels A"
-          Done
-        }}
+        val taskB: Cancellable = co.addCancellableTask("b", "taskB") { () =>
+          Future {
+            taskA.cancel()
+            testProbe.ref ! "B cancels A"
+            Done
+          }
+        }
       }
-      co.addCancellableTask("a", "taskA"){ () => Future {
-        co.addCancellableTask("b", "dependentTaskB"){ () => Future {
-          testProbe.ref ! "A adds B"
+      co.addCancellableTask("a", "taskA") { () =>
+        Future {
+          co.addCancellableTask("b", "dependentTaskB") { () =>
+            Future {
+              testProbe.ref ! "A adds B"
+              Done
+            }
+          }
           Done
-        }}
-        Done
-      }}
-      co.addCancellableTask("a", "taskA"){ () => Future {
-        co.addCancellableTask("a", "dependentTaskA"){ () => Future {
-          testProbe.ref ! "A adds A"
+        }
+      }
+      co.addCancellableTask("a", "taskA") { () =>
+        Future {
+          co.addCancellableTask("a", "dependentTaskA") { () =>
+            Future {
+              testProbe.ref ! "A adds A"
+              Done
+            }
+          }
           Done
-        }}
-        Done
-      }}
-      co.addCancellableTask("b", "taskB"){ () => Future {
-        co.addCancellableTask("a", "dependentTaskA"){ () => Future {
-          testProbe.ref ! "B adds A"
+        }
+      }
+      co.addCancellableTask("b", "taskB") { () =>
+        Future {
+          co.addCancellableTask("a", "dependentTaskA") { () =>
+            Future {
+              testProbe.ref ! "B adds A"
+              Done
+            }
+          }
           Done
-        }}
-        Done
-      }}
+        }
+      }
 
       List(TaskAB.taskA, TaskAB.taskB).foreach { t =>
         t.isCancelled shouldBe false
@@ -283,21 +302,24 @@ class CoordinatedShutdownSpec
       case class BMessage(content: String)
 
       val messageA = "concurrentA"
-      val task: () => Future[Done] = () => Future {
-        testProbe.ref ! messageA
-        co.addCancellableTask("b", "concurrentB"){() => Future {
-          testProbe.ref ! BMessage("concurrentB")
+      val task: () => Future[Done] = () =>
+        Future {
+          testProbe.ref ! messageA
+          co.addCancellableTask("b", "concurrentB") { () =>
+            Future {
+              testProbe.ref ! BMessage("concurrentB")
+              Done
+            }(ExecutionContexts.sameThreadExecutionContext)
+          }
           Done
-        }(ExecutionContexts.sameThreadExecutionContext)}
-        Done
-      }(ExecutionContexts.sameThreadExecutionContext)
+        }(ExecutionContexts.sameThreadExecutionContext)
 
       val cancellables = ParSeq.range(0, 20).map { _ =>
         co.addCancellableTask("a", "concurrentTaskA")(task)
       }
 
       val shouldBeCancelled = cancellables.zipWithIndex.collect {
-        case (c, i) if i%2 == 0 => c
+        case (c, i) if i % 2 == 0 => c
       }
 
       cancellables.foreach { _ =>

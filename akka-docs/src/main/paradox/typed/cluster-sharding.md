@@ -87,6 +87,20 @@ Scala
 Java
 :  @@snip [ShardingCompileOnlyTest.java](/akka-cluster-sharding-typed/src/test/java/jdocs/akka/cluster/sharding/typed/ShardingCompileOnlyTest.java) { #send }
 
+Cluster sharding `init` should be called on every node for each entity type. Which nodes entity actors are created on
+can be controlled with roles. `init` will create a `ShardRegion` or a proxy depending on whether the node's role matches
+the entity's role. 
+
+Specifying the role:
+
+Scala
+:  @@snip [ShardingCompileOnlySpec.scala](/akka-cluster-sharding-typed/src/test/scala/docs/akka/cluster/sharding/typed/ShardingCompileOnlySpec.scala) { #roles }
+
+Java
+:  @@snip [ShardingCompileOnlyTest.java](/akka-cluster-sharding-typed/src/test/java/jdocs/akka/cluster/sharding/typed/ShardingCompileOnlyTest.java) { #roles }
+
+
+
 ## Persistence example
 
 When using sharding entities can be moved to different nodes in the cluster. Persistence can be used to recover the state of
@@ -363,8 +377,8 @@ using Cluster Sharding. Stop all Cluster nodes before using this program.
 
 It can be needed to remove the data if the Cluster Sharding coordinator
 cannot startup because of corrupt data, which may happen if accidentally
-two clusters were running at the same time, e.g. caused by using auto-down
-and there was a network partition.
+two clusters were running at the same time, e.g. caused by an invalid downing
+provider when there was a network partition.
 
 Use this program as a standalone Java main program:
 

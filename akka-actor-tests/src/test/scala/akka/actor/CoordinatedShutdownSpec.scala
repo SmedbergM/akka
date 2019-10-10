@@ -15,7 +15,6 @@ import akka.actor.CoordinatedShutdown.Phase
 import akka.actor.CoordinatedShutdown.UnknownReason
 import akka.util.ccompat.JavaConverters._
 import java.util.concurrent.{ Executors, TimeoutException }
-import scala.collection.parallel.ParSeq
 
 import akka.ConfigurationException
 import akka.dispatch.ExecutionContexts
@@ -314,7 +313,7 @@ class CoordinatedShutdownSpec
           Done
         }(ExecutionContexts.sameThreadExecutionContext)
 
-      val cancellables = ParSeq.range(0, 20).map { _ =>
+      val cancellables = (0 to 20).map { _ =>
         co.addCancellableTask("a", "concurrentTaskA")(task)
       }
 
@@ -322,11 +321,11 @@ class CoordinatedShutdownSpec
         case (c, i) if i % 2 == 0 => c
       }
 
-      cancellables.foreach { _ =>
-        shouldBeCancelled.foreach { c =>
+      cancellables.foreach { c0 => Future {
+        shouldBeCancelled.foreach { c => Future {
           c.cancel() shouldBe true // .cancel is idempotent -- can be safely called multiple times from multiple threads
-        }
-      }
+        }}
+      }}
 
       val messagesFut = Future {
         testProbe.receiveN(20, 3.seconds).map(_.toString)

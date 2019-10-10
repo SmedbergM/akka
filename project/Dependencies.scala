@@ -17,9 +17,9 @@ object Dependencies {
   val junitVersion = "4.12"
   val slf4jVersion = "1.7.28"
   // check agrona version when updating this
-  val aeronVersion = "1.21.2"
+  val aeronVersion = "1.22.0"
   // needs to be inline with the aeron version
-  val agronaVersion = "1.0.7"
+  val agronaVersion = "1.0.8"
   val nettyVersion = "3.10.6.Final"
   val jacksonVersion = "2.10.0"
   val jacksonDatabindVersion = "2.10.0"
@@ -208,8 +208,7 @@ object Dependencies {
         Provided.levelDBNative,
         Test.junit,
         Test.scalatest.value,
-        Test.commonsIo,
-        Test.mockito)
+        Test.commonsIo)
 
   val clusterMetrics = l ++= Seq(Provided.sigarLoader, Test.slf4jJul, Test.slf4jLog4j, Test.logback, Test.mockito)
 

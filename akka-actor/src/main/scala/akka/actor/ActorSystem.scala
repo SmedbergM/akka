@@ -467,6 +467,7 @@ object ActorSystem {
     final val Daemonicity: Boolean = getBoolean("akka.daemonic")
     final val JvmExitOnFatalError: Boolean = getBoolean("akka.jvm-exit-on-fatal-error")
     final val JvmShutdownHooks: Boolean = getBoolean("akka.jvm-shutdown-hooks")
+    final val FailMixedVersions: Boolean = getBoolean("akka.fail-mixed-versions")
 
     final val CoordinatedShutdownTerminateActorSystem: Boolean = getBoolean(
       "akka.coordinated-shutdown.terminate-actor-system")
@@ -634,7 +635,7 @@ abstract class ActorSystem extends ActorRefFactory with ClassicActorSystemProvid
   def mailboxes: Mailboxes
 
   /**
-   * Register a block of code (callback) to run after [[ActorSystem.terminate()]] has been issued and
+   * Register a block of code (callback) to run after [[ActorSystem.terminate]] has been issued and
    * all actors in this actor system have been stopped.
    * Multiple code blocks may be registered by calling this method multiple times.
    * The callbacks will be run sequentially in reverse order of registration, i.e.
@@ -648,7 +649,7 @@ abstract class ActorSystem extends ActorRefFactory with ClassicActorSystemProvid
   def registerOnTermination[T](code: => T): Unit
 
   /**
-   * Java API: Register a block of code (callback) to run after [[ActorSystem.terminate()]] has been issued and
+   * Java API: Register a block of code (callback) to run after [[ActorSystem.terminate]] has been issued and
    * all actors in this actor system have been stopped.
    * Multiple code blocks may be registered by calling this method multiple times.
    * The callbacks will be run sequentially in reverse order of registration, i.e.

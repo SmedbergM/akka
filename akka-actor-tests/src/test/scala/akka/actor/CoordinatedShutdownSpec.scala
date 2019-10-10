@@ -295,7 +295,7 @@ class CoordinatedShutdownSpec
       val co = new CoordinatedShutdown(extSys, phases)
       val testProbe = TestProbe()
 
-      val executor = Executors.newFixedThreadPool(10)
+      val executor = Executors.newFixedThreadPool(25)
       implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutor(executor)
 
       case class BMessage(content: String)
@@ -313,19 +313,27 @@ class CoordinatedShutdownSpec
           Done
         }(ExecutionContexts.sameThreadExecutionContext)
 
-      val cancellables = (0 to 20).map { _ =>
-        co.addCancellableTask("a", "concurrentTaskA")(task)
+      val cancellationFut: Future[Done] = {
+        val cancellables = (0 until 20).map { _ =>
+          co.addCancellableTask("a", "concurrentTaskA")(task)
+        }
+        val shouldBeCancelled = cancellables.zipWithIndex.collect {
+          case (c, i) if i % 2 == 0 => c
+        }
+        val cancelFutures = for {
+          _ <- cancellables
+          c <- shouldBeCancelled
+        } yield Future {
+          c.cancel() shouldBe true
+          Done
+        }
+        cancelFutures.foldLeft(Future.successful(Done)) {
+          case (acc, fut) =>
+            acc.flatMap(_ => fut)
+        }
       }
 
-      val shouldBeCancelled = cancellables.zipWithIndex.collect {
-        case (c, i) if i % 2 == 0 => c
-      }
-
-      cancellables.foreach { c0 => Future {
-        shouldBeCancelled.foreach { c => Future {
-          c.cancel() shouldBe true // .cancel is idempotent -- can be safely called multiple times from multiple threads
-        }}
-      }}
+      Await.result(cancellationFut, 250.milliseconds)
 
       val messagesFut = Future {
         testProbe.receiveN(20, 3.seconds).map(_.toString)
